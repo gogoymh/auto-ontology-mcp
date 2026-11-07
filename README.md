@@ -396,7 +396,7 @@ A long document does not belong in a database row, and an excerpt is no use with
 | Source field | When | What happens |
 | --- | --- | --- |
 | `original` | The note is already in your vault (a web clipping, your own notes) | The path is checked and stored, relative to the vault |
-| `original_text` | The text exists only in the conversation (a web page the model read, a transcript) | Written as a new note in `originals/`, with the source's title, URI and date as frontmatter |
+| `original_text` | The text exists only in the conversation (a web page the model read, a transcript) | Written as a new note in `originals/`, with the source's title, URI, date and a hash of the text as frontmatter |
 | `original_file` | A local PDF, image or document | Copied into `originals/`. Hidden files and other file types are refused |
 
 Existing files are never overwritten; a different original with the same name gets a numbered name (see [When a source changes](#when-a-source-changes)). Passages carry the heading they came from, so search results and exported pages link to `[[originals/Note#Heading]]` and Obsidian opens the original at that section. Set `AUTO_ONTOLOGY_VAULT` to your own vault and the generated pages and originals go to its `auto-ontology/` folder; otherwise `~/.auto-ontology-mcp/wiki/knowledge` is the vault.
@@ -407,7 +407,7 @@ Nothing is rebuilt. Each change touches the rows it concerns, and the search ind
 
 | What changed | What the model does | What happens |
 | --- | --- | --- |
-| A document | Saves the source again with the same `uri` (or its id) and the new `original_text` or `original_file`, then calls `save_passages(..., replace=true)` with every passage of the new version | The source keeps its id. Passages whose text is unchanged keep their ids and links; the others are deleted and listed in `deleted`. The new original becomes a new note (`Team handbook (2).md`) and the source points at it. The old note stays with your annotations, and `recent_changes` records the switch. `get_source` lists the records and concepts that cite the source, to correct with `edit_records` and `save_concept` |
+| A document | Saves the source again with the same `uri` (or its id) and the new `original_text` or `original_file`, then calls `save_passages(..., replace=true)` with every passage of the new version | The source keeps its id. Passages whose text is unchanged keep their ids and Term links; the others are deleted and listed in `deleted`. The new original becomes a new note (`Team handbook (2).md`) and the source points at it, so passage `[[links]]` open the new version. The old note stays with your annotations, and `recent_changes` records the switch. `get_source` lists the records and concepts that cite the source, to correct with `edit_records` and `save_concept` |
 | A database schema | Calls `scan_datasource` (or you run `auto-ontology-mcp scan NAME`) | Tables and columns are added to and dropped from the catalog. Terms, certified status, reviewed joins and SQL attributes stay, and inferred joins are tested again. `get_modeling_worklist` returns new tables and modeled tables that gained columns; the latter come with `new_columns` and the `current_terms` to send back with the new columns placed |
 | Rows in a database | Nothing | Queries run against the live database. A re-scan refreshes samples and profiles |
 
@@ -503,6 +503,7 @@ Limits to know about:
 - Generated pages are a one-way view. Edits made to them in Obsidian are not read back; change knowledge through the assistant and run `export_wiki` again (it replaces only the pages it generated and never touches originals or pages you wrote).
 - Search is lexical, not semantic: FTS5 matches words and prefixes, not meaning. Search with the words the sources use, add your own words as synonyms, and translate when the sources are in another language.
 - The store indexes passages, not whole originals. What the model did not save as a passage or summary is in the vault but not in `search_text`.
+- Nothing watches your files or the vault. When a document changes, ask the assistant to read it again. Earlier versions of its original stay in the vault until you delete them.
 - It is a single-user store on your machine. Back it up by copying `~/.auto-ontology-mcp`.
 
 Large existing tables (bank exports, workout logs) load faster with [sqlite-utils](https://sqlite-utils.datasette.io/) into their own database, connected read-only next to the store:
