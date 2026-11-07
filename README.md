@@ -199,6 +199,7 @@ Remove everything the demo added to the knowledge store and the vault with `auto
 | **Full-text search** | FTS5 indexes over passages, Term bodies and sources, ranked with bm25. Prefix matching finds words with Korean particles attached (기억 → 기억을), and a substring pass finds them inside compounds. `search_text` returns snippets, headings and `[[links]]` to the originals |
 | **Concept graph in SQL** | Terms, typed relations, Term sources and passages are tables next to the records, and the FTS indexes are queryable too, so one validated query can combine a text search, a `WITH RECURSIVE` walk over relations and the records |
 | **Originals in Obsidian** | The full text of each source stays in your Obsidian vault: a note already there, transcribed text saved as a new note, or a copied PDF or image. The store keeps the summary and excerpts and links back to the heading they came from |
+| **Updates in place** | Nothing is rebuilt when a source changes. A re-scan keeps Terms, certification and reviewed joins, and sends new tables and columns added to modeled tables back to the model. A changed document replaces its own passages and gets its new original as a new note next to the old one |
 | **Portable** | Export and import the whole semantic layer as one YAML or JSON document |
 
 Results of the scan on the demo database, as reported by `auto-ontology-mcp demo`:
@@ -398,7 +399,19 @@ A long document does not belong in a database row, and an excerpt is no use with
 | `original_text` | The text exists only in the conversation (a web page the model read, a transcript) | Written as a new note in `originals/`, with the source's title, URI and date as frontmatter |
 | `original_file` | A local PDF, image or document | Copied into `originals/`. Hidden files and other file types are refused |
 
-Existing files are never overwritten; a different original with the same name gets a numbered name. Passages carry the heading they came from, so search results and exported pages link to `[[originals/Note#Heading]]` and Obsidian opens the original at that section. Set `AUTO_ONTOLOGY_VAULT` to your own vault and the generated pages and originals go to its `auto-ontology/` folder; otherwise `~/.auto-ontology-mcp/wiki/knowledge` is the vault.
+Existing files are never overwritten; a different original with the same name gets a numbered name (see [When a source changes](#when-a-source-changes)). Passages carry the heading they came from, so search results and exported pages link to `[[originals/Note#Heading]]` and Obsidian opens the original at that section. Set `AUTO_ONTOLOGY_VAULT` to your own vault and the generated pages and originals go to its `auto-ontology/` folder; otherwise `~/.auto-ontology-mcp/wiki/knowledge` is the vault.
+
+### When a source changes
+
+Nothing is rebuilt. Each change touches the rows it concerns, and the search indexes follow row by row.
+
+| What changed | What the model does | What happens |
+| --- | --- | --- |
+| A document | Saves the source again with the same `uri` (or its id) and the new `original_text` or `original_file`, then calls `save_passages(..., replace=true)` with every passage of the new version | The source keeps its id. Passages whose text is unchanged keep their ids and links; the others are deleted and listed in `deleted`. The new original becomes a new note (`Team handbook (2).md`) and the source points at it. The old note stays with your annotations, and `recent_changes` records the switch. `get_source` lists the records and concepts that cite the source, to correct with `edit_records` and `save_concept` |
+| A database schema | Calls `scan_datasource` (or you run `auto-ontology-mcp scan NAME`) | Tables and columns are added to and dropped from the catalog. Terms, certified status, reviewed joins and SQL attributes stay, and inferred joins are tested again. `get_modeling_worklist` returns new tables and modeled tables that gained columns; the latter come with `new_columns` and the `current_terms` to send back with the new columns placed |
+| Rows in a database | Nothing | Queries run against the live database. A re-scan refreshes samples and profiles |
+
+The server does not watch files or compare document versions on its own: the model reads the new version and tells the store what changed. Saving the same document again changes nothing. Notes written by 0.5.0 and later carry a `sha256` of the text in their frontmatter, so a note you have annotated in Obsidian still counts as the same original; older notes are compared by their text. A note you linked yourself with `original` is yours to update and is never replaced.
 
 ### Searching and combining
 
@@ -562,10 +575,11 @@ Each step of Auto Ontology maps to one side of that line:
 | Checking SQL | Database probes plus an LLM review | Server: database probes and ontology checks in `validate_sql` |
 | Storage | Postgres and pgvector | Local SQLite files |
 | Ingesting knowledge | Ingestion service reads databases | The model reads files, images and notes; the server validates and stores the records, concepts and sources it extracts |
+| Schema changes | Scheduled re-ingest diffs the catalog; semantic compilation models only tables that have no Term yet | `scan_datasource` diffs the catalog; the worklist returns new tables and modeled tables that gained columns |
 
 Search is lexical because there is no embedding model: token overlap, trigram similarity and phrase match for Terms and columns, and SQLite FTS5 with bm25 for the text of passages, bodies and sources. The server instructions ask the model to search with the schema's vocabulary, translate non-English phrases, and add the user's own words as synonyms with `update_term(add_synonyms=[...])`, after which they match directly.
 
-Not carried over from Auto Ontology: the web UI and REST API, users, groups and RBAC, zones (access scoping), tags and rules, PII detection, JSONB path checks, embedding search and reranking, chart generation, KumoRFM predictions and Apache Ossie interchange (export and import use this project's own YAML format). Added here and not in Auto Ontology: write access over MCP, the personal knowledge store (Auto Ontology ingests databases, not documents), concept pages with typed relations, provenance on records, passages with full-text search, originals kept in Obsidian, and the Obsidian export.
+Not carried over from Auto Ontology: the web UI and REST API, users, groups and RBAC, zones (access scoping), tags and rules, PII detection, JSONB path checks, embedding search and reranking, chart generation, KumoRFM predictions and Apache Ossie interchange (export and import use this project's own YAML format). Added here and not in Auto Ontology: write access over MCP, the personal knowledge store (Auto Ontology ingests databases, not documents), concept pages with typed relations, provenance on records, passages with full-text search, originals kept in Obsidian, the Obsidian export, and returning columns added to modeled tables to the model after a re-scan.
 
 ## Safety
 
@@ -609,7 +623,7 @@ auto-ontology-mcp serve --transport http --port 8765 --token ...
 auto-ontology-mcp demo                 the retail database 'demo' and three demo documents in the knowledge store
 auto-ontology-mcp demo --remove        remove the demo database registration and everything the demo documents added
 auto-ontology-mcp add NAME URL         register and scan a datasource
-auto-ontology-mcp scan NAME            re-scan; reviewed joins and Terms are kept
+auto-ontology-mcp scan NAME            re-scan; Terms and reviewed joins are kept, new tables and columns are reported
 auto-ontology-mcp list                 readiness of every datasource
 auto-ontology-mcp export NAME -o ontology.yaml
 auto-ontology-mcp export-wiki -o ~/vault/ontology   Obsidian vault of the knowledge store
