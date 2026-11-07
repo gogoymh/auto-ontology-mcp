@@ -33,7 +33,9 @@ show the SQL, and mention truncation and any uncertified (draft) Terms you relie
 Building an ontology: add_datasource → scan_datasource → get_modeling_worklist / \
 save_table_terms until no tables remain → list_relationships / set_relationship to review \
 proposed joins → suggest_sql_attributes / save_sql_attribute → certify what a person approved \
-with update_term(status="certified").
+with update_term(status="certified"). After a schema change, scan_datasource again: Terms and \
+reviewed joins are kept, and get_modeling_worklist returns new tables and modeled tables that \
+gained columns (send their current_terms back with the new columns placed).
 
 Keeping personal knowledge (datasource "knowledge", created on first use): when the user shares \
 documents, images, notes or facts to remember, read them yourself and store what they contain. \

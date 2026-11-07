@@ -177,7 +177,8 @@ def build_server(settings: Settings | None = None, service: OntologyService | No
             confirmed by value containment. Use it after the schema changed or to refresh
             profiles; add_datasource already scans once. Terms, reviewed relationships and SQL
             attributes are kept; inferred relationships that lost their evidence are removed.
-            Reads the database only."""
+            Reports new tables and columns added to modeled tables; get_modeling_worklist returns
+            both. Reads the database only."""
             return svc.scan_datasource(datasource, schemas, profile)
 
     # ------------------------------------------------------------- modeling
@@ -190,8 +191,10 @@ def build_server(settings: Settings | None = None, service: OntologyService | No
         """Return the next tables that still have no business Terms, with what you need to name them: candidate
         columns (types, samples, uniqueness, formats), foreign keys and the Terms they point to, and
         the modeling rules. Use it while building an ontology over a database; call save_table_terms
-        once per returned table and repeat until remaining is 0. For the personal knowledge store
-        use define_entity instead. Read-only."""
+        once per returned table and repeat until remaining is 0. After a re-scan it also returns
+        modeled tables that gained columns, with new_columns and current_terms: send current_terms
+        back with each new column added to its Term. For the personal knowledge store use
+        define_entity instead. Read-only."""
         return svc.get_modeling_worklist(datasource, limit, tables)
 
     @tool(WRITE)

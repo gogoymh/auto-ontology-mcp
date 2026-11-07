@@ -1,6 +1,9 @@
-"""When a source changes: a document saved again after it was updated."""
+"""When a source changes: a document saved again, or a database whose schema changed since it was modeled."""
 
 from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
 
 import pytest
 from fastmcp import Client
@@ -118,3 +121,48 @@ async def test_replace_over_mcp(settings):
             "passages": [{"text": "Refunds take 30 days."}], "source": {**HANDBOOK, "original_text": V2}, "replace": True,
         })
         assert out.data["deleted"] == [1] and out.data["original"] == "originals/Team handbook (2).md"
+
+
+# ---------------------------------------------------------------- databases
+def test_rescan_returns_modeled_tables_that_gained_columns(modeled: OntologyService, demo_path: Path):
+    svc = modeled
+    svc.update_term("Product", status="certified", datasource="demo")
+    with sqlite3.connect(demo_path) as con:
+        con.execute("ALTER TABLE products ADD COLUMN warranty_months INTEGER")
+        con.execute("CREATE TABLE coupons (coupon_id INTEGER PRIMARY KEY, code TEXT)")
+
+    scan = svc.scan_datasource("demo")
+    assert scan["tables_without_terms"] == 1 and scan["new_columns_on_modeled_tables"] == {"products": ["warranty_months"]}
+    demo = next(d for d in svc.check_readiness()["datasources"] if d["datasource"] == "demo")
+    assert demo["verdict"] == "partially_modeled"
+    assert demo["tables_without_terms"] == ["coupons"] and demo["tables_with_new_columns"] == ["products"]
+
+    work = svc.get_modeling_worklist("demo", limit=10)
+    assert work["progress"]["remaining"] == 2 and work["progress"]["modeled_with_new_columns"] == 1
+    assert [t["table"] for t in work["tables"]] == ["coupons", "products"]  # new tables first
+    products = work["tables"][1]
+    assert products["new_columns"] == ["warranty_months"]
+    (current,) = products["current_terms"]
+    assert current["name"] == "Product" and "warranty_months" not in [c["column"] for c in current["columns"]]
+    assert "current_terms" in work["next_step"]
+
+    # Send the current Terms back with the new column placed.
+    current["columns"].append({"column": "warranty_months", "display_name": "Warranty Months"})
+    saved = svc.save_table_terms("products", [current], datasource="demo")
+    assert saved["removed_terms"] == [] and saved["certified_terms_reset_to_draft"] == []
+    svc.save_table_terms("coupons", [{"name": "Coupon", "description": "A discount code.", "columns": [
+        {"column": "coupon_id", "display_name": "Coupon ID"}, {"column": "code", "display_name": "Code"}]}], datasource="demo")
+
+    work = svc.get_modeling_worklist("demo")
+    assert work["progress"]["remaining"] == 0 and work["tables"] == []
+    assert next(d for d in svc.check_readiness()["datasources"] if d["datasource"] == "demo")["verdict"] == "ready"
+    assert svc.get_term("Product", datasource="demo")["status"] == "certified"
+    assert "warranty_months" in str(svc.get_query_context(["Product"], datasource="demo"))
+
+
+def test_knowledge_entities_are_not_reported_as_new_columns(k):
+    k.define_entity("Workout", columns=[{"name": "minutes", "type": "integer"}])
+    k.add_records("Workout", [{"minutes": 30}], source={"title": "Watch export", "kind": "file"})
+    k.define_entity("Workout", columns=[{"name": "calories", "type": "integer"}])
+    know = next(d for d in k.svc.check_readiness()["datasources"] if d["datasource"] == "knowledge")
+    assert know["tables_with_new_columns"] == []
