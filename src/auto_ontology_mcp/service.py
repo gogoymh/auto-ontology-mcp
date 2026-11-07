@@ -1178,6 +1178,8 @@ class OntologyService:
                 what = f"SQL attribute {d.get('term', '')} › {d.get('name', subject)}: {r['action']}"
             elif r["entity_type"] == "relationship":
                 what = f"relationship {d.get('source', '')} → {d.get('target', '')}: {r['action']}"
+            elif r["entity_type"] == "source" and r["action"] == "replace_original":
+                what = f"source {d.get('title') or subject}: new original {d.get('original')} (previous {d.get('previous')} kept)"
             else:
                 what = f"{r['entity_type'].replace('_', ' ')} {subject}: {r['action']}"
             changes.append({"at": r["at"], "what": what})
