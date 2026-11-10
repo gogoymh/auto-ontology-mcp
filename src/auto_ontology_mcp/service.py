@@ -1736,11 +1736,11 @@ class OntologyService:
             run=lambda q: self._run(ds, q, max_rows=1000),
         )
 
-    def validate_sql(self, sql: str, datasource: str | None = None) -> dict[str, Any]:
+    def validate_sql(self, sql: str, datasource: str | None = None, question: str | None = None) -> dict[str, Any]:
         ds = self.ds(datasource)
         if self.knowledge.is_knowledge(ds):
             self.knowledge.index.sync()
-        result = self._validator(ds).validate(sql, probe=True)
+        result = self._validator(ds).validate(sql, probe=True, question=question)
         result["datasource"] = ds["name"]
         result["dialect"] = self.dialect(ds)
         if result["valid"] and not result["warnings"]:
@@ -1762,7 +1762,9 @@ class OntologyService:
             raise OntologyError(str(exc)) from exc
         cap = max(1, min(int(max_rows or 100), self.settings.max_rows))
         validator = self._validator(ds)
-        static = validator.validate(sql, probe=False)
+        # Percent-vs-fraction checks run here too (two cheap min/max probes per compared column): a model
+        # that skips validate_sql still hears that 0.18 against a 0-1 rate column is 18%, not 0.18%.
+        static = validator.validate(sql, probe=False, scale=True, question=question)
         qid = new_id("q")
         try:
             result = self.connections.run_readonly(ds, sql.strip().rstrip(";"), max_rows=cap)
