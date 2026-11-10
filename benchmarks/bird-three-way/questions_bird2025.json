@@ -1,0 +1,914 @@
+[
+ {
+  "question_id": 5,
+  "db_id": "california_schools",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 11,
+  "db_id": "california_schools",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 12,
+  "db_id": "california_schools",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 17,
+  "db_id": "california_schools",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 23,
+  "db_id": "california_schools",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 24,
+  "db_id": "california_schools",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 25,
+  "db_id": "california_schools",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 26,
+  "db_id": "california_schools",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 27,
+  "db_id": "california_schools",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 28,
+  "db_id": "california_schools",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 31,
+  "db_id": "california_schools",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 32,
+  "db_id": "california_schools",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 36,
+  "db_id": "california_schools",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 37,
+  "db_id": "california_schools",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 39,
+  "db_id": "california_schools",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 40,
+  "db_id": "california_schools",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 41,
+  "db_id": "california_schools",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 45,
+  "db_id": "california_schools",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 46,
+  "db_id": "california_schools",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 47,
+  "db_id": "california_schools",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 48,
+  "db_id": "california_schools",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 50,
+  "db_id": "california_schools",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 62,
+  "db_id": "california_schools",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 72,
+  "db_id": "california_schools",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 77,
+  "db_id": "california_schools",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 79,
+  "db_id": "california_schools",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 82,
+  "db_id": "california_schools",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 83,
+  "db_id": "california_schools",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 85,
+  "db_id": "california_schools",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 87,
+  "db_id": "california_schools",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 89,
+  "db_id": "financial",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 92,
+  "db_id": "financial",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 93,
+  "db_id": "financial",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 94,
+  "db_id": "financial",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 95,
+  "db_id": "financial",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 98,
+  "db_id": "financial",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 99,
+  "db_id": "financial",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 100,
+  "db_id": "financial",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 112,
+  "db_id": "financial",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 115,
+  "db_id": "financial",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 116,
+  "db_id": "financial",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 117,
+  "db_id": "financial",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 118,
+  "db_id": "financial",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 119,
+  "db_id": "financial",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 120,
+  "db_id": "financial",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 125,
+  "db_id": "financial",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 128,
+  "db_id": "financial",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 129,
+  "db_id": "financial",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 136,
+  "db_id": "financial",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 137,
+  "db_id": "financial",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 138,
+  "db_id": "financial",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 145,
+  "db_id": "financial",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 149,
+  "db_id": "financial",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 152,
+  "db_id": "financial",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 159,
+  "db_id": "financial",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 168,
+  "db_id": "financial",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 169,
+  "db_id": "financial",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 173,
+  "db_id": "financial",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 186,
+  "db_id": "financial",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 189,
+  "db_id": "financial",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 192,
+  "db_id": "financial",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 194,
+  "db_id": "financial",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1149,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1150,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1152,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1153,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1155,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1156,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1157,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1162,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1164,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1166,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1168,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1169,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1171,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1175,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1179,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1185,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1187,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1189,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1192,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1195,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1198,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1201,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1205,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1208,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1209,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1220,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1225,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1227,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1229,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1231,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1232,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1235,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1238,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1239,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1241,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1242,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1243,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1247,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1251,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1252,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1254,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1255,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1256,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1257,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1265,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1267,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1270,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1275,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1281,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 1302,
+  "db_id": "thrombosis_prediction",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 195,
+  "db_id": "toxicology",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 197,
+  "db_id": "toxicology",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 198,
+  "db_id": "toxicology",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 200,
+  "db_id": "toxicology",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 201,
+  "db_id": "toxicology",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 206,
+  "db_id": "toxicology",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 207,
+  "db_id": "toxicology",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 208,
+  "db_id": "toxicology",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 212,
+  "db_id": "toxicology",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 213,
+  "db_id": "toxicology",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 215,
+  "db_id": "toxicology",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 218,
+  "db_id": "toxicology",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 219,
+  "db_id": "toxicology",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 220,
+  "db_id": "toxicology",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 226,
+  "db_id": "toxicology",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 227,
+  "db_id": "toxicology",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 228,
+  "db_id": "toxicology",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 230,
+  "db_id": "toxicology",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 231,
+  "db_id": "toxicology",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 232,
+  "db_id": "toxicology",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 234,
+  "db_id": "toxicology",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 236,
+  "db_id": "toxicology",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 239,
+  "db_id": "toxicology",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 240,
+  "db_id": "toxicology",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 242,
+  "db_id": "toxicology",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 243,
+  "db_id": "toxicology",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 244,
+  "db_id": "toxicology",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 245,
+  "db_id": "toxicology",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 247,
+  "db_id": "toxicology",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 248,
+  "db_id": "toxicology",
+  "difficulty": "simple",
+  "has_evidence": true
+ },
+ {
+  "question_id": 249,
+  "db_id": "toxicology",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 253,
+  "db_id": "toxicology",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 255,
+  "db_id": "toxicology",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 260,
+  "db_id": "toxicology",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 263,
+  "db_id": "toxicology",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 268,
+  "db_id": "toxicology",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 273,
+  "db_id": "toxicology",
+  "difficulty": "moderate",
+  "has_evidence": true
+ },
+ {
+  "question_id": 281,
+  "db_id": "toxicology",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 282,
+  "db_id": "toxicology",
+  "difficulty": "challenging",
+  "has_evidence": true
+ },
+ {
+  "question_id": 327,
+  "db_id": "toxicology",
+  "difficulty": "moderate",
+  "has_evidence": true
+ }
+]

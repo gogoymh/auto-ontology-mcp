@@ -11,11 +11,12 @@ import bench
 
 p = argparse.ArgumentParser()
 p.add_argument("--name", default="main")
+p.add_argument("--set", default="dev", choices=list(bench.QUESTION_SETS))
 p.add_argument("--evidence", action="store_true", help="also print BIRD's evidence hint (never shown to the models)")
 p.add_argument("qids", nargs="+", type=int)
 args = p.parse_args()
 
-gold = {r["question_id"]: r for r in bench.read_jsonl(bench.GOLD_FILE)}
+gold = {r["question_id"]: r for r in bench.read_gold(args.set)}
 answers = bench.read_jsonl(bench.RESULTS / args.name / "answers.jsonl")
 scores = {(s["condition"], s["question_id"], s["trial"]): s for s in bench.read_jsonl(bench.RESULTS / args.name / "scores.jsonl")}
 

@@ -48,7 +48,7 @@ python3 bench.py score --name main
 python3 bench.py report --name main            # writes results/main/summary.md
 ```
 
-Add `--set test` to `run`, `score` and `report` for the held-out questions. The conditions are `plain`, `wiki`, `ontology`, `ontology-answer` (the same ontology served with `AUTO_ONTOLOGY_TOOLSETS=answer`, which needs the server from #10; an older server ignores the variable and exposes every tool) and `ontology-v1` (the server from `BENCH_SERVER_V1`, default `~/auto-ontology-bench/server-v1`, a `git worktree` of `d6bf3d0`, with the ontologies in `builds/ontology-run1`).
+Add `--set test` to `run`, `score` and `report` for the held-out questions, or `--set bird2025` for the 2025 release (save `archive/bird_mini_dev_2025-07-04/data/mini_dev_sqlite-00000-of-00001.json` from the same Hugging Face repository as `~/auto-ontology-bench/hf/archive/mini_dev_sqlite_2025.json`). `BENCH_SERVER` points the ontology conditions at another server build. The conditions are `plain`, `plain-evidence` (plain with BIRD's hint appended to the question), `wiki`, `ontology`, `ontology-answer` (the same ontology served with `AUTO_ONTOLOGY_TOOLSETS=answer`, which needs the server from #10; an older server ignores the variable and exposes every tool) and `ontology-v1` (the server from `BENCH_SERVER_V1`, default `~/auto-ontology-bench/server-v1`, a `git worktree` of `d6bf3d0`, with the ontologies in `builds/ontology-run1`).
 
 `BENCH_MODEL` picks the model (default `sonnet`). `run` resumes: sessions already in `results/<name>/answers.jsonl` are skipped.
 
@@ -99,6 +99,23 @@ Sources: `results/v2-test` (plain, wiki, ontology-v1) and `results/v3-test` (the
 - **Re-run sessions are left out of cost.** 46 ontology sessions of `v2-test` started while a server edit was briefly on disk and were re-run with the tested code. Re-running in the same workspace path hits the prompt cache of the first attempt and costs about half, so cost and time come from first attempts only (`rerun` in `answers.jsonl`).
 
 `compare.py` puts conditions from different runs side by side, for example `python3 compare.py v2-test:plain v2-test:ontology-v1 v3-test:ontology-answer`.
+
+## Third round: terse questions in business terms (2025 release, 2026-11-10)
+
+The 2026 annotations spell definitions out in the question, which leaves little for a knowledge layer to add. The 2025-07-04 release of BIRD Mini-Dev asks the same databases tersely ("accounts who choose issuance after transaction", "eligible free rate") and puts the meaning in the evidence hint, which is the setting of the BIRD paper's ablation without external knowledge. This round asks all 152 questions of the four databases from that release (`questions_bird2025.json`) without the hint, two trials each, and once more with the hint given to the plain condition (`plain-evidence`) as an upper bound. The ontology condition is #10's server with the `answer` tool group (`BENCH_SERVER` pointing at a checkout of `0268919`) and the ontologies in `builds/ontology`. Results: `results/bird2025`.
+
+| 152 questions, 2025 release | plain | wiki | ontology, `answer` tools | plain with the hint |
+| --- | ---: | ---: | ---: | ---: |
+| EX | 53.3% (162/304) | 52.3% (159/304) | 53.6% (163/304) | 58.6% (89/152) |
+| Difference from plain, 95% interval | | −1.0 (−3.6 to +1.6) | +0.3 (−3.6 to +4.3) | +5.3 (−1.3 to +11.8) |
+| EX, california_schools | 36.7% | 28.3% | 35.0% | 60.0% |
+| EX, toxicology | 52.5% | 53.8% | 60.0% | 55.0% |
+| Cost per question, mean | $0.076 | $0.078 | $0.095 | $0.071 |
+
+- **Neither knowledge layer recovered what the hints carry.** Both stay within a point of plain. Even the hint itself adds only 5.3 points, and its interval includes zero.
+- **Most of what the hint adds is the annotator's convention, not domain knowledge.** Of the 17 questions the hinted run got right and the ontology runs missed both times, three compute a rate from counts (`FRPM Count (K-12)` / `Enrollment (K-12)`) where the database already stores one (`Percent (%) Eligible FRPM (K-12)` and similar); the model used the stored column, which holds a rounded fraction where two of the three gold queries want a percent, and others sort by `ABS(longitude)`, divide a decrease by the later month, or count laboratory rows rather than patients. q1198 is #10's list-column handling: the ontology runs matched 'APS' inside lists ('APS, SLE'), while the 2025 gold uses `Diagnosis = 'APS'`.
+- **63 of 152 questions stay wrong with the hint.** The 2025 release is the one the 2026 revision corrected; its gold SQL carries conventions and errors no setup can infer, so it measures agreement with the annotators more than the use of knowledge.
+- The ontology condition costs 25% more than plain per question, as in the second round.
 
 ## What to keep in mind
 

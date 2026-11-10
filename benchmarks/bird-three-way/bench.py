@@ -56,14 +56,19 @@ GIST_FILE = ROOT / "llm_wiki_gist.md"
 GIST_SHA256 = "dc3efe98ae62f23dd08acad13aba2e95287beb20b6bec2f4af0423557fe37401"  # the revision the published results used
 ZIP_FILE = ROOT / "download" / "minidev.zip"
 RESULTS = HERE / "results"
-QUESTION_SETS = {"dev": HERE / "questions.json", "test": HERE / "questions_test.json"}
+# 2025-07-04 release of the same questions' databases: terse questions in business terms, meaning in the evidence.
+GOLD_2025_FILE = ROOT / "hf" / "archive" / "mini_dev_sqlite_2025.json"
+QUESTION_SETS = {"dev": HERE / "questions.json", "test": HERE / "questions_test.json", "bird2025": HERE / "questions_bird2025.json"}
+GOLD_FILES = {"dev": GOLD_FILE, "test": GOLD_FILE, "bird2025": GOLD_2025_FILE}
 
 DBS = ["california_schools", "financial", "thrombosis_prediction", "toxicology"]
 PER_DB = 15
 SEED = 20261109
 MODEL = os.environ.get("BENCH_MODEL", "sonnet")
-SERVER = REPO / ".venv" / "bin" / "auto-ontology-mcp"
-CONDITIONS = ["plain", "wiki", "ontology", "ontology-answer", "ontology-v1"]
+SERVER = Path(os.environ.get("BENCH_SERVER", REPO / ".venv" / "bin" / "auto-ontology-mcp")).expanduser()
+CONDITIONS = ["plain", "wiki", "ontology", "ontology-answer", "ontology-v1", "plain-evidence"]
+# plain-evidence: plain with BIRD's evidence hint appended to the question, as an upper bound for what the
+# knowledge layers are meant to supply.
 # ontology-v1: the server before the changes in this branch (BENCH_SERVER_V1, a checkout of d6bf3d0) with the
 # ontologies that version built (builds/ontology-run1), to compare versions on questions neither was tuned on.
 SERVERS = {"ontology-v1": Path(os.environ.get("BENCH_SERVER_V1", "~/auto-ontology-bench/server-v1/.venv/bin/auto-ontology-mcp")).expanduser()}
@@ -226,10 +231,17 @@ def parse_transcript(path: Path) -> dict:
     }
 
 
+def read_gold(name: str) -> list[dict]:
+    """BIRD's records for a question set: a JSON Lines file (2026) or a JSON array (2025 release)."""
+    text = GOLD_FILES[name].read_text()
+    return json.loads(text) if text.lstrip().startswith("[") else [json.loads(x) for x in text.splitlines() if x.strip()]
+
+
 def load_questions(name: str) -> list[dict]:
-    """A question set (ids and metadata, as committed) joined with BIRD's question text."""
-    text = {r["question_id"]: r["question"] for r in read_jsonl(GOLD_FILE)}
-    return [q | {"question": text[q["question_id"]]} for q in json.loads(QUESTION_SETS[name].read_text())]
+    """A question set (ids and metadata, as committed) joined with BIRD's question text and evidence."""
+    gold = {r["question_id"]: r for r in read_gold(name)}
+    return [q | {"question": gold[q["question_id"]]["question"], "evidence": gold[q["question_id"]]["evidence"]}
+            for q in json.loads(QUESTION_SETS[name].read_text())]
 
 
 def fetch_gist() -> Path:
@@ -266,14 +278,15 @@ def cmd_prepare(args: argparse.Namespace) -> None:
                         shutil.copyfileobj(src, out)
             log(f"{db}: {(dest / 'db.sqlite').stat().st_size / 1e6:.1f} MB, docs {sorted(p.name for p in (dest / 'docs').iterdir())}")
 
-    rows = read_jsonl(GOLD_FILE)
-    # dev: the questions the first run used (and the fixes were made against); test: held out from dev.
+    rows = read_gold(args.set)
+    # dev: the questions the first run used (and the fixes were made against); test: held out from dev;
+    # bird2025: every question of the four databases in the 2025 release.
     rng = random.Random(SEED if args.set == "dev" else SEED + 1)
-    exclude = set() if args.set == "dev" else {q["question_id"] for q in load_questions("dev")}
+    exclude = {q["question_id"] for q in load_questions("dev")} if args.set == "test" else set()
     picked = []
     for db in DBS:
         pool = sorted((r for r in rows if r["db_id"] == db and r["question_id"] not in exclude), key=lambda r: r["question_id"])
-        for r in sorted(rng.sample(pool, PER_DB), key=lambda r: r["question_id"]):
+        for r in pool if args.set == "bird2025" else sorted(rng.sample(pool, PER_DB), key=lambda r: r["question_id"]):
             picked.append({"question_id": r["question_id"], "db_id": db,
                            "difficulty": r["difficulty"], "has_evidence": bool(r["evidence"])})
     out = QUESTION_SETS[args.set]
@@ -379,7 +392,7 @@ def run_one(name: str, condition: str, q: dict, trial: int) -> None:
     ws.mkdir(parents=True)
     copy_docs(db, ws)
     home = None
-    if condition in ("plain", "wiki"):
+    if condition in ("plain", "wiki", "plain-evidence"):
         link_db(db, ws)
         tools = "Bash,Read,Grep,Glob"
         if condition == "wiki":
@@ -390,8 +403,11 @@ def run_one(name: str, condition: str, q: dict, trial: int) -> None:
             shutil.rmtree(home)
         shutil.copytree(BUILDS / ONTOLOGY_BUILD.get(condition, "ontology") / db / "home", home)
         tools = "Read,Grep,Glob"
+    question = q["question"]
+    if condition == "plain-evidence" and q.get("evidence"):
+        question += f"\n\nExternal knowledge for this question: {q['evidence']}"
     prompt = (HERE / "prompts" / "question.md").read_text().format(
-        preamble=PREAMBLE[condition.split("-")[0]].format(db=db), db=db, question=q["question"])
+        preamble=PREAMBLE[condition.split("-")[0]].format(db=db), db=db, question=question)
     res = claude(prompt, cwd=ws, tools=tools, mcp=mcp_config(home, toolsets=TOOLSETS.get(condition), server=SERVERS.get(condition, SERVER)), transcript=base / f"{key}.jsonl",
                  budget=QUESTION_BUDGET_USD, timeout=QUESTION_TIMEOUT_S, schema=ANSWER_SCHEMA)
     row = {"condition": condition, "question_id": qid, "db_id": db, "trial": trial, **res}
@@ -441,7 +457,7 @@ def execute(db: str, sql: str) -> tuple[list | None, str | None]:
 
 
 def cmd_score(args: argparse.Namespace) -> None:
-    gold = {r["question_id"]: r for r in read_jsonl(GOLD_FILE)}
+    gold = {r["question_id"]: r for r in read_gold(args.set)}
     gold_rows: dict[int, list] = {}
     scored = []
     for r in read_jsonl(RESULTS / args.name / "answers.jsonl"):
