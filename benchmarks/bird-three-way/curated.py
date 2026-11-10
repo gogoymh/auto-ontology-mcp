@@ -33,7 +33,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import bench
 
 SEED = 20261111
-CONDS = ["plain-notes", "wiki-curated", "ontology-curated"]
+CONDS = ["plain-notes", "wiki-curated", "ontology-curated", "ontology-addon"]
 NOTES = "verified_queries.md"
 NOTES_LINE = (" `docs/verified_queries.md` lists earlier questions about this database, the note that came with each, "
               "and the SQL that was confirmed correct.")
@@ -47,6 +47,13 @@ Ingest it into `wiki/` the way `LLM_WIKI.md` and `wiki/SCHEMA.md` describe: add 
 terms, formulas, code meanings, join and filter conventions, reusable query patterns) to the pages it concerns, add pages \
 where needed, and update `wiki/index.md` and `wiki/log.md`. People will keep asking this wiki data questions that are \
 answered with SQL. Work on your own. Do not modify `db.sqlite` or `docs/`. Reply with a short summary of what you changed."""
+
+# ontology-addon: everything plain-notes has (sqlite3 through Bash, docs/) plus the MCP server, as the server is used
+# from a coding agent. It measures what the server adds, rather than what it replaces.
+ADDON = (" The auto-ontology MCP tools give a semantic layer over the same database, as the datasource `{db}`: definitions "
+         "of its tables and columns, a glossary, and verified queries similar to a question (get_query_context with the "
+         "question). validate_sql and run_sql (pass the question to both) check a query for wrong literals, value variants, "
+         "scale and fan-out. Use them together with sqlite3.")
 
 ONTOLOGY_PROMPT = """New knowledge has arrived for the datasource `{db}`: `docs/verified_queries.md` in the current folder. \
 It lists questions people asked about the database, the domain note that came with each, and the SQL that was confirmed \
@@ -169,12 +176,15 @@ def run_one(name: str, condition: str, q: dict, trial: int) -> None:
     bench.copy_docs(db, ws)
     (ws / "docs" / NOTES).write_text(notes_text(db, know))
     home = None
-    if condition == "ontology-curated":
+    if condition in ("ontology-curated", "ontology-addon"):
         home = base / f"{key}.home"
         if home.exists():
             shutil.rmtree(home)
         shutil.copytree(bench.BUILDS / f"ontology-k{know}" / db / "home", home)
         tools, preamble = "Read,Grep,Glob", bench.PREAMBLE["ontology"].format(db=db) + NOTES_LINE + WORKFLOW
+        if condition == "ontology-addon":
+            bench.link_db(db, ws)
+            tools, preamble = "Bash,Read,Grep,Glob", bench.PREAMBLE["plain"] + NOTES_LINE + ADDON.format(db=db)
     else:
         bench.link_db(db, ws)
         tools, preamble = "Bash,Read,Grep,Glob", bench.PREAMBLE["plain"] + NOTES_LINE
@@ -190,7 +200,7 @@ def run_one(name: str, condition: str, q: dict, trial: int) -> None:
 
 
 def cmd_run(args: argparse.Namespace) -> None:
-    qs = [q for q in questions() if not args.db or q["db_id"] in args.db]
+    qs = [q for q in questions() if (not args.db or q["db_id"] in args.db) and (args.fold is None or q["fold"] == args.fold)]
     if args.limit:
         qs = qs[: args.limit]
     done = {(r["condition"], r["question_id"], r["trial"]) for r in bench.read_jsonl(bench.RESULTS / args.name / "answers.jsonl")}
@@ -220,6 +230,7 @@ def main() -> None:
     r.add_argument("--trials", type=int, default=1)
     r.add_argument("--jobs", type=int, default=10)
     r.add_argument("--limit", type=int, default=0)
+    r.add_argument("--fold", type=int, choices=[0, 1], help="only the questions of this fold")
     r.set_defaults(fn=cmd_run)
     args = p.parse_args()
     args.fn(args)

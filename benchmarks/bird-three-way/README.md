@@ -161,6 +161,18 @@ The earlier rounds gave the layers only what one build pass drew from the schema
 - No session errored or left its workspace. All 500 gold pairs were accepted by `save_example_query`; curation cost $12.5.
 - Limits: at most 43 verified queries per database, which fits in one file read; whether retrieval from a layer pays off with thousands of entries is not tested here.
 
+### Follow-up on fold 0: why the file does at least as well (not pre-registered)
+
+Looking only at fold 0 of the Haiku run, the questions the ontology lost showed no single defect. Two patterns recurred: plain access looks at the stored values with `sqlite3` and writes `Admission LIKE '+%'` where the ontology runs wrote `= '+'` (three rows hold `'+('`), and the longer tool sequence came with more slips in the output (an unrequested `ROUND`, an extra column). Two changes were tried on fold 0 with Haiku, two trials (`results/tune-haiku`): a server warning when an equality literal leaves out dirty variants of the same value, and `ontology-addon`, which gives the model everything `plain-notes` has (Bash, `sqlite3`, `docs/`) plus the MCP server.
+
+| Fold 0, Haiku, 253 questions | plain-notes | ontology-curated | ontology-addon |
+| --- | ---: | ---: | ---: |
+| EX | 85.4% | 83.6% | 83.0% |
+| Difference from plain-notes, 95% interval | | −1.8 (−5.3 to +1.6) | −2.4 (−5.3 to +0.6) |
+| Cost per question | $0.008 | $0.011 | $0.010 |
+
+Adding the server to plain access did not raise accuracy, so no configuration was carried to fold 1 for confirmation. Server warnings fired in 12% of the add-on sessions and those sessions were not more accurate. Five add-on sessions listed the data folder outside their workspace (the same database and descriptions).
+
 ## What to keep in mind
 
 - 60 questions is a sample. A difference of a few questions between conditions is within noise; the pairwise table in the summary shows how many questions each condition alone got right.
