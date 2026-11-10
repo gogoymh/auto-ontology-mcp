@@ -117,6 +117,34 @@ The 2026 annotations spell definitions out in the question, which leaves little 
 - **63 of 152 questions stay wrong with the hint.** The 2025 release is the one the 2026 revision corrected; its gold SQL carries conventions and errors no setup can infer, so it measures agreement with the annotators more than the use of knowledge.
 - The ontology condition costs 25% more than plain per question, as in the second round.
 
+## Fourth round: pre-registered, 440 questions (2026-11-10)
+
+To settle the question with enough questions, the design, endpoint and decision rule were written down and pushed before any session ran ([`PREREGISTRATION.md`](PREREGISTRATION.md), commit `d9bc707`). It uses every 2026 Mini-Dev question of all 11 databases except the 60 the server changes were designed against: 440 questions, two trials per condition, evidence withheld. The ontology condition is #10 and #12 merged (local commit `d480777`) with the `answer` tool group. The wikis and ontologies of the seven new databases were built the same way as the others. Results: `results/final-sonnet`, `results/final-haiku`, and `results/final-summary.md` from `analyze_prereg.py`.
+
+| 440 questions | A | B | B − A | 95% interval | 90% interval | questions B better / worse | verdict |
+| --- | ---: | ---: | ---: | --- | --- | ---: | --- |
+| **Primary**: Sonnet, ontology (B) − plain (A) | 85.7% | 87.5% | +1.8 | −0.7 to +4.3 | −0.2 to +4.0 | 38 / 27 | inconclusive |
+| Sonnet, wiki − plain | 85.7% | 86.5% | +0.8 | −1.2 to +3.0 | −1.0 to +2.6 | 32 / 27 | equivalent within 3 points |
+| Sonnet, ontology − wiki | 86.5% | 87.5% | +1.0 | −1.0 to +3.1 | −0.7 to +2.7 | 31 / 22 | equivalent within 3 points |
+| Haiku, ontology − plain | 80.8% | 82.6% | +1.8 | −0.8 to +4.4 | −0.5 to +4.0 | 55 / 34 | inconclusive |
+
+| Cost per question | plain | wiki | ontology |
+| --- | ---: | ---: | ---: |
+| Sonnet 5.5 | $0.077 | $0.080 | $0.095 |
+| Haiku 5.5 | $0.006 | | $0.008 |
+
+- **Verdict: inconclusive.** With Sonnet the ontology answered 1.8 points more questions, but the 95% interval reaches −0.7, so the run cannot call it better; and the 90% interval reaches +4.0, so it cannot call the two equivalent within 3 points either. What it does rule out: the ontology being worse by more than 0.7 points or better by more than 4.3.
+- **Haiku shows the same +1.8 points**, also inconclusive by the pre-registered rule.
+- **The wiki and plain access are equivalent within 3 points, and so are the ontology and the wiki.**
+- **Cost**: the ontology costs 23% more than plain with Sonnet and 25% more with Haiku. Haiku with the ontology (82.6%, $0.008) costs about a tenth of Sonnet with plain access (85.7%, $0.077).
+- Sessions: none errored. One Haiku ontology session (q309, trial 2) listed the data folder outside its workspace (it holds the same database and description CSVs, not the gold SQL) and is excluded, as the pre-registration says.
+
+Exploratory, not pre-registered:
+
+- Averaging each question's difference over the two models gives +1.8 points (95% interval −0.1 to +3.7). Counting questions, Haiku's ontology runs did better on 55 and worse on 34 (two-sided sign test p = 0.033); Sonnet's on 38 and 27 (p = 0.22). The direction is consistent; the size is small.
+- Questions the ontology won in both Sonnet trials while plain lost both include a diagnosis stored as a list (q383, #10's `holds_lists`), a work-rate column whose stored values include junk besides low, medium and high (q175, found with `lookup_values`), and per-group rows where plain pivoted the counts into columns (q349).
+- Confirming a 1.8-point difference with 80% power needs about 1,750 questions at the spread seen here, four times this run.
+
 ## What to keep in mind
 
 - 60 questions is a sample. A difference of a few questions between conditions is within noise; the pairwise table in the summary shows how many questions each condition alone got right.
