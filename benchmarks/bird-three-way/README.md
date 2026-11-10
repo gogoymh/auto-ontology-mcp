@@ -145,6 +145,22 @@ Exploratory, not pre-registered:
 - Questions the ontology won in both Sonnet trials while plain lost both include a diagnosis stored as a list (q383, #10's `holds_lists`), a work-rate column whose stored values include junk besides low, medium and high (q175, found with `lookup_values`), and per-group rows where plain pivoted the counts into columns (q349).
 - Confirming a 1.8-point difference with 80% power needs about 1,750 questions at the spread seen here, four times this run.
 
+## Fifth round: the layers with accumulated knowledge (pre-registered, 2026-11-10)
+
+The earlier rounds gave the layers only what one build pass drew from the schema and column descriptions. This round tests them holding curated knowledge, and with the ontology set up as its documentation intends ([`PREREGISTRATION-curated.md`](PREREGISTRATION-curated.md), commit `78c36cc`, pushed before the runs; `curated.py`). The 500 questions are split into two folds per database, and a question is answered with the other fold's questions, evidence notes and gold SQL: as a file in `docs/` (`plain-notes`), ingested into the wiki (`wiki-curated`), or saved as verified example queries, glossary entries and SQL attributes (`ontology-curated`, which is also prompted with the server's answering steps and runs a server where `describe_table` shows the ontology's column descriptions, local commit `0aba40f`). The raw file stays in `docs/` for every condition. Results: `results/curated-sonnet` (one trial), `results/curated-haiku` (two trials), `results/curated-summary.md`.
+
+| 500 questions | plain-notes | wiki-curated | ontology-curated | ontology − plain-notes, 95% interval | verdict |
+| --- | ---: | ---: | ---: | --- | --- |
+| **Primary**: Sonnet 5.5 | 89.0% | 87.0% | 88.4% | −0.6 (−3.2 to +2.0) | equivalent within 3 points |
+| Haiku 5.5 | 85.2% | 81.8% | 82.1% | −3.1 (−5.7 to −0.6) | worse |
+| Cost per question, Sonnet / Haiku | $0.090 / $0.007 | $0.089 / $0.008 | $0.107 / $0.009 | | |
+
+- **The knowledge helps; the layer it sits in does not.** Against plain access without it (fourth round, 440 shared questions), the file alone adds 3.6 points with Sonnet and 4.9 with Haiku (both intervals above zero), and the curated ontology adds 3.0 and 1.2.
+- **With Sonnet the ontology is equivalent to the file; with Haiku the ontology and the wiki are both about 3 points worse than the file.** A model reading 7 to 43 verified queries straight from a file does at least as well as one reaching them through a layer.
+- The ontology sessions did follow the documented steps this time (`validate_sql`, `get_query_context` with the question), at 19% (Sonnet) and 26% (Haiku) more cost than the file.
+- No session errored or left its workspace. All 500 gold pairs were accepted by `save_example_query`; curation cost $12.5.
+- Limits: at most 43 verified queries per database, which fits in one file read; whether retrieval from a layer pays off with thousands of entries is not tested here.
+
 ## What to keep in mind
 
 - 60 questions is a sample. A difference of a few questions between conditions is within noise; the pairwise table in the summary shows how many questions each condition alone got right.
