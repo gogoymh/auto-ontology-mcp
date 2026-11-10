@@ -59,8 +59,8 @@ RESULTS = HERE / "results"
 # 2025-07-04 release of the same questions' databases: terse questions in business terms, meaning in the evidence.
 GOLD_2025_FILE = ROOT / "hf" / "archive" / "mini_dev_sqlite_2025.json"
 QUESTION_SETS = {"dev": HERE / "questions.json", "test": HERE / "questions_test.json", "bird2025": HERE / "questions_bird2025.json",
-                 "full2026": HERE / "questions_full2026.json"}
-GOLD_FILES = {"dev": GOLD_FILE, "test": GOLD_FILE, "bird2025": GOLD_2025_FILE, "full2026": GOLD_FILE}
+                 "full2026": HERE / "questions_full2026.json", "cv2026": HERE / "questions_cv2026.json"}
+GOLD_FILES = {"dev": GOLD_FILE, "test": GOLD_FILE, "bird2025": GOLD_2025_FILE, "full2026": GOLD_FILE, "cv2026": GOLD_FILE}
 
 DBS = ["california_schools", "financial", "thrombosis_prediction", "toxicology"]  # the first three rounds
 ALL_DBS = sorted(DBS + ["card_games", "codebase_community", "debit_card_specializing", "european_football_2",
@@ -69,7 +69,8 @@ PER_DB = 15
 SEED = 20261109
 MODEL = os.environ.get("BENCH_MODEL", "sonnet")
 SERVER = Path(os.environ.get("BENCH_SERVER", REPO / ".venv" / "bin" / "auto-ontology-mcp")).expanduser()
-CONDITIONS = ["plain", "wiki", "ontology", "ontology-answer", "ontology-v1", "plain-evidence"]
+CONDITIONS = ["plain", "wiki", "ontology", "ontology-answer", "ontology-v1", "plain-evidence",
+              "plain-notes", "wiki-curated", "ontology-curated"]  # the last three: curated.py
 # plain-evidence: plain with BIRD's evidence hint appended to the question, as an upper bound for what the
 # knowledge layers are meant to supply.
 # ontology-v1: the server before the changes in this branch (BENCH_SERVER_V1, a checkout of d6bf3d0) with the
