@@ -58,10 +58,13 @@ ZIP_FILE = ROOT / "download" / "minidev.zip"
 RESULTS = HERE / "results"
 # 2025-07-04 release of the same questions' databases: terse questions in business terms, meaning in the evidence.
 GOLD_2025_FILE = ROOT / "hf" / "archive" / "mini_dev_sqlite_2025.json"
-QUESTION_SETS = {"dev": HERE / "questions.json", "test": HERE / "questions_test.json", "bird2025": HERE / "questions_bird2025.json"}
-GOLD_FILES = {"dev": GOLD_FILE, "test": GOLD_FILE, "bird2025": GOLD_2025_FILE}
+QUESTION_SETS = {"dev": HERE / "questions.json", "test": HERE / "questions_test.json", "bird2025": HERE / "questions_bird2025.json",
+                 "full2026": HERE / "questions_full2026.json"}
+GOLD_FILES = {"dev": GOLD_FILE, "test": GOLD_FILE, "bird2025": GOLD_2025_FILE, "full2026": GOLD_FILE}
 
-DBS = ["california_schools", "financial", "thrombosis_prediction", "toxicology"]
+DBS = ["california_schools", "financial", "thrombosis_prediction", "toxicology"]  # the first three rounds
+ALL_DBS = sorted(DBS + ["card_games", "codebase_community", "debit_card_specializing", "european_football_2",
+                        "formula_1", "student_club", "superhero"])
 PER_DB = 15
 SEED = 20261109
 MODEL = os.environ.get("BENCH_MODEL", "sonnet")
@@ -262,7 +265,7 @@ def fetch_gist() -> Path:
 def cmd_prepare(args: argparse.Namespace) -> None:
     with zipfile.ZipFile(ZIP_FILE) as z:
         names = z.namelist()
-        for db in DBS:
+        for db in ALL_DBS:
             dest = DATA / db
             if (dest / "db.sqlite").exists():
                 log(f"{db}: already extracted")
@@ -271,6 +274,13 @@ def cmd_prepare(args: argparse.Namespace) -> None:
             sqlite_name = next(n for n in names if n.endswith(f"/dev_databases/{db}/{db}.sqlite"))
             with z.open(sqlite_name) as src, (dest / "db.sqlite").open("wb") as out:
                 shutil.copyfileobj(src, out)
+            with (dest / "db.sqlite").open("rb") as f:
+                f.seek(18)
+                wal = f.read(1) == b"\x02"
+            if wal:  # card_games ships in WAL mode, which a read-only open of a read-only file cannot use
+                con = sqlite3.connect(dest / "db.sqlite")
+                con.execute("PRAGMA journal_mode=DELETE")
+                con.close()
             (dest / "db.sqlite").chmod(0o444)
             for n in names:
                 if f"/dev_databases/{db}/database_description/" in n and n.endswith(".csv"):
@@ -280,13 +290,14 @@ def cmd_prepare(args: argparse.Namespace) -> None:
 
     rows = read_gold(args.set)
     # dev: the questions the first run used (and the fixes were made against); test: held out from dev;
-    # bird2025: every question of the four databases in the 2025 release.
+    # bird2025: every question of the four databases in the 2025 release; full2026: every 2026 question
+    # of all eleven databases except the dev set, which the server changes were made against.
     rng = random.Random(SEED if args.set == "dev" else SEED + 1)
-    exclude = {q["question_id"] for q in load_questions("dev")} if args.set == "test" else set()
+    exclude = {q["question_id"] for q in load_questions("dev")} if args.set in ("test", "full2026") else set()
     picked = []
-    for db in DBS:
+    for db in ALL_DBS if args.set == "full2026" else DBS:
         pool = sorted((r for r in rows if r["db_id"] == db and r["question_id"] not in exclude), key=lambda r: r["question_id"])
-        for r in pool if args.set == "bird2025" else sorted(rng.sample(pool, PER_DB), key=lambda r: r["question_id"]):
+        for r in pool if args.set in ("bird2025", "full2026") else sorted(rng.sample(pool, PER_DB), key=lambda r: r["question_id"]):
             picked.append({"question_id": r["question_id"], "db_id": db,
                            "difficulty": r["difficulty"], "has_evidence": bool(r["evidence"])})
     out = QUESTION_SETS[args.set]
@@ -311,7 +322,7 @@ def render_build_ontology_prompt(db: str) -> str:
         "asyncio.run(main())\n"
     )
     env = {**os.environ, **server_env(BUILDS / "ontology" / db / "home", datasource_tools=True)}
-    out = subprocess.run([str(REPO / ".venv" / "bin" / "python"), "-c", code, db], env=env, capture_output=True, text=True, check=True)
+    out = subprocess.run([str(SERVER.parent / "python"), "-c", code, db], env=env, capture_output=True, text=True, check=True)
     return out.stdout.strip()
 
 
@@ -497,7 +508,7 @@ def cmd_report(args: argparse.Namespace) -> None:
              f"asked without evidence. Metric: strict execution accuracy (EX).", ""]
     lines += ["| | " + " | ".join(conds) + " |", "| --- | " + " | ".join("---:" for _ in conds) + " |"]
     lines.append("| EX, all | " + " | ".join(pct([s["ex"] for s in by[c]]) for c in conds) + " |")
-    for db in DBS:
+    for db in sorted({q["db_id"] for q in questions.values()}):
         lines.append(f"| EX, {db} | " + " | ".join(pct([s["ex"] for s in by[c] if s["db_id"] == db]) for c in conds) + " |")
     for flag, label in ((True, "with evidence in BIRD"), (False, "no evidence in BIRD")):
         lines.append(f"| EX, {label} | " + " | ".join(
