@@ -612,23 +612,30 @@ def build_server(settings: Settings | None = None, service: OntologyService | No
     def validate_sql(
         sql: Annotated[str, Field(description="One read-only SELECT in the datasource dialect.")],
         datasource: DatasourceArg = None,
+        question: Annotated[
+            str | None, Field(description="The user's question; percentages in it are checked against the scale of the columns they filter.")
+        ] = None,
     ) -> dict[str, Any]:
         """Check one query without returning rows: read-only guard, unknown tables or columns (with the
         ontology's name for them), joins the ontology does not know or that use a non-default role,
         near-miss literals, percent-vs-fraction thresholds, one-to-many fan-out under SUM/AVG/COUNT,
-        and a dry run; also which Terms it relies on and whether they are certified. Use it before
+        and a dry run; also which Terms it relies on and whether they are certified. Pass the question
+        to have a percentage it states ("below 0.18%") checked against the column's scale. Use it before
         run_sql and fix every error. Read-only."""
-        return svc.validate_sql(sql, datasource)
+        return svc.validate_sql(sql, datasource, question)
 
     @tool(READ_DB)
     def run_sql(
         sql: Annotated[str, Field(description="One read-only SELECT in the datasource dialect.")],
-        question: Annotated[str | None, Field(description="The user's question, kept with the query for provenance.")] = None,
+        question: Annotated[
+            str | None,
+            Field(description="The user's question, kept with the query for provenance and used to check percentages in it against the columns' scale."),
+        ] = None,
         max_rows: Annotated[int, Field(description="Rows to return (capped by the server).")] = 100,
         datasource: DatasourceArg = None,
     ) -> dict[str, Any]:
         """Execute one read-only SELECT and return columns, rows, row_count and truncated, plus the Terms it
-        used and warnings. Use it after validate_sql. Writes, DDL, multiple statements and tables
+        used and warnings (including percent-vs-fraction thresholds). Use it after validate_sql. Writes, DDL, multiple statements and tables
         outside the catalog are refused, and the connection itself is read-only. The query is logged
         with the question for provenance. Show the SQL with the answer and say when rows are
         truncated."""

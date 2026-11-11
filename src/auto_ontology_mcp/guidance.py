@@ -26,7 +26,7 @@ the ontology covers. If something material is not covered, say so and ask; do no
 verified example queries for the Terms you will use.
 4. lookup_values for any literal filter (names, statuses, places) you are not sure about.
 5. Write the SQL yourself in the datasource dialect, using the join path and SQL attributes.
-6. validate_sql, fix every error, take warnings seriously (fan-out, near-miss literals, \
+6. validate_sql with the user's question, fix every error, take warnings seriously (fan-out, near-miss literals, \
 unverified joins, percent-vs-fraction).
 7. run_sql with the user's question. Check the rows against the question before you answer, \
 show the SQL, and mention truncation and any uncertified (draft) Terms you relied on.

@@ -20,6 +20,8 @@ from .sqlcheck import Analysis, PhysicalColumn, SqlGuardError, analyze, guard_re
 
 CLOSE_MATCH_CUTOFF = 0.6
 LOW_CARD_THRESHOLD = 200
+# "0.18%", "12.5 percent", "30 퍼센트": a percentage written in the question.
+_QUESTION_PERCENT = re.compile(r"(\d+(?:\.\d+)?)\s*(?:%|percent\b|per cent\b|퍼센트|프로\b)", re.IGNORECASE)
 
 
 def qtable(schema: str | None, name: str) -> exp.Table:
@@ -71,6 +73,7 @@ class Validator:
         self.table_name_by_id = {c["table_id"]: c["table_name"] for c in catalog_columns if c.get("table_id")}
         self.run = run
         self._attribute_joins: dict[frozenset, dict[str, Any]] | None = None
+        self._ranges: dict[str, tuple[Any, Any] | None] = {}
 
     def attribute_joins(self) -> dict[frozenset, dict[str, Any]]:
         """Column pairs joined by a join SQL attribute, keyed like _check_joins keys them."""
@@ -113,7 +116,10 @@ class Validator:
         return None
 
     # ------------------------------------------------------------------- main
-    def validate(self, sql: str, *, probe: bool = True) -> dict[str, Any]:
+    def validate(self, sql: str, *, probe: bool = True, scale: bool = False, question: str | None = None) -> dict[str, Any]:
+        """Check *sql*. probe runs every data probe (literals, scale, dry run); scale runs only the
+        min/max probes behind the percent-vs-fraction checks; question lets those checks compare the
+        percentages the question states with the numbers in the query."""
         errors: list[str] = []
         warnings: list[str] = []
         notes: list[str] = []
@@ -139,9 +145,12 @@ class Validator:
         self._check_list_columns(analysis, warnings)
         if probe:
             self._check_string_literals(analysis, warnings)
+        if probe or scale:
             self._check_numeric_scale(analysis, warnings)
-            if not errors:
-                self._dry_run(tree, errors)
+            if question:
+                self._check_question_percents(analysis, question, warnings)
+        if probe and not errors:
+            self._dry_run(tree, errors)
 
         grounding = self.grounding(analysis, sql)
         if grounding["draft_terms"]:
@@ -508,15 +517,10 @@ class Validator:
             if not col or col["id"] in seen:
                 continue
             seen.add(col["id"])
-            try:
-                rows = self._probe(
-                    exp.select(exp.Min(this=qcol(col["name"])), exp.Max(this=qcol(col["name"]))).from_(self._table_expr(col))
-                )
-            except Exception:  # noqa: BLE001
+            rng = self._range(col)
+            if rng is None:
                 continue
-            lo, hi = rows[0] if rows else (None, None)
-            if not isinstance(lo, (int, float)) or not isinstance(hi, (int, float)):
-                continue
+            lo, hi = rng
             for v in f["values"]:
                 if lo <= v <= hi:
                     continue
@@ -532,6 +536,58 @@ class Validator:
                     )
                 else:
                     warnings.append(f"{f['sql']}: the value {v} is outside the column's range {lo}–{hi}.")
+
+    def _range(self, col: dict[str, Any]) -> tuple[float, float] | None:
+        """The column's numeric min and max in the data, probed once per validation."""
+        if col["id"] not in self._ranges:
+            try:
+                rows = self._probe(
+                    exp.select(exp.Min(this=qcol(col["name"])), exp.Max(this=qcol(col["name"]))).from_(self._table_expr(col))
+                )
+                lo, hi = rows[0] if rows else (None, None)
+            except Exception:  # noqa: BLE001
+                lo = hi = None
+            ok = all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in (lo, hi))
+            self._ranges[col["id"]] = (lo, hi) if ok else None
+        return self._ranges[col["id"]]
+
+    def _check_question_percents(self, analysis: Analysis, question: str, warnings: list[str]) -> None:
+        """A percentage in the question compared at the wrong scale, where the value still fits the column.
+
+        "below 0.18%" written as `rate < 0.18` against a 0-1 fraction column passes the range check
+        (0.18 is a valid fraction) but means 18%. Likewise "18%" written as 0.18 against a column that
+        stores percents. The range check above catches the values that fall outside the column.
+        """
+        percents = {float(m.group(1)) for m in _QUESTION_PERCENT.finditer(question)}
+        percents.discard(0.0)
+        if not percents:
+            return
+        done: set[tuple[str, float]] = set()
+        for f in analysis.numeric_filters:
+            col = self._col(f["column"])
+            rng = self._range(col) if col else None
+            if rng is None:
+                continue
+            lo, hi = rng
+            name = f"{col['table_name']}.{col['name']}"
+            fraction = lo >= 0 and hi <= 1.5
+            percent_named = any(k in col["name"].casefold() for k in ("pct", "percent", "%"))
+            for v in f["values"]:
+                if not isinstance(v, (int, float)) or not lo <= v <= hi or (col["id"], v) in done:
+                    continue
+                for p in percents:
+                    if fraction and _same(v, p) and not _same(v, p / 100):
+                        done.add((col["id"], v))
+                        warnings.append(
+                            f"{f['sql']}: the question says {p:g}%, but {name} holds fractions from {lo:g} to {hi:g}, "
+                            f"so {p:g}% is {p / 100:g}. Did you mean {p / 100:g}?"
+                        )
+                    elif percent_named and not fraction and hi <= 100 and _same(v, p / 100) and not _same(v, p):
+                        done.add((col["id"], v))
+                        warnings.append(
+                            f"{f['sql']}: the question says {p:g}%, but {name} holds percents from {lo:g} to {hi:g}, "
+                            f"so {p:g}% is {p:g}. Did you mean {p:g}?"
+                        )
 
     def _dry_run(self, tree: exp.Expression, errors: list[str]) -> None:
         try:
@@ -606,3 +662,7 @@ def _strip_qualifiers(sql: str, dialect: str | None, whole: bool = False) -> str
     if not whole and text.upper().startswith("SELECT "):
         text = text[7:]
     return " ".join(text.split()).casefold()
+
+
+def _same(a: float, b: float) -> bool:
+    return abs(a - b) <= 1e-9 * max(1.0, abs(a), abs(b))
