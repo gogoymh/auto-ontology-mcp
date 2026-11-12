@@ -96,8 +96,19 @@ _FORBIDDEN_FUNCTIONS = frozenset(
         "read_text",
         "read_blob",
         "glob",
+        # Oracle: URI types fetch URLs or rows by path, BFILENAME reads server files.
+        "httpuritype",
+        "dburitype",
+        "xdburitype",
+        "uritype",
+        "bfilename",
     }
 )
+
+# Owners / packages whose members must not be called by qualified name (Oracle: sys.dbms_*, ctxsys.*).
+_FORBIDDEN_QUALIFIERS = frozenset({"sys", "ctxsys", "ordsys", "mdsys", "xdb", "wmsys", "lbacsys", "dvsys", "olapsys"})
+# Pseudo-columns that advance or read a sequence (seq.NEXTVAL changes state).
+_SEQUENCE_PSEUDOCOLUMNS = frozenset({"nextval", "currval"})
 
 
 # Name prefixes / suffixes of functions that touch files, other servers or server state.
@@ -119,6 +130,31 @@ def _forbidden_function(name: str) -> bool:
         or n.startswith(_FORBIDDEN_PREFIXES)
         or n.endswith(_FORBIDDEN_SUFFIXES)
     )
+
+
+def _qualifier_segments(func: exp.Expression) -> list[str]:
+    """Owner / package names in front of a call such as ``sys.dbms_xmlgen.getxml(...)``.
+
+    sqlglot builds either ``Dot(qualifier, call)`` or a ``Column`` whose parts
+    end in the call, so the dotted text in front of the call is read off the
+    outermost such ancestor.
+    """
+    top = func
+    while isinstance(top.parent, (exp.Dot, exp.Column)):
+        top = top.parent
+    if top is func:
+        return []
+    head = top.sql().split("(", 1)[0]
+    parts = [p.strip().strip('"`[]').lower() for p in head.split(".")]
+    return [p for p in parts[:-1] if p]
+
+
+def _is_sequence_reference(node: exp.Expression) -> bool:
+    if isinstance(node, exp.Column):
+        return bool(node.table) and node.name.lower() in _SEQUENCE_PSEUDOCOLUMNS
+    if isinstance(node, exp.Dot):
+        return node.name.lower() in _SEQUENCE_PSEUDOCOLUMNS
+    return False
 
 
 def guard_sources(tree: exp.Expression, catalog_tables: Iterable[tuple[str, str]]) -> None:
@@ -178,6 +214,11 @@ def guard_readonly(sql: str, dialect: str | None) -> exp.Expression:
             name = (node.sql_name() if not isinstance(node, exp.Anonymous) else str(node.this)).lower()
             if _forbidden_function(name):
                 raise SqlGuardError(f"Function {name}() is not allowed.")
+            for part in [*_qualifier_segments(node), *name.split(".")[:-1]]:
+                if part in _FORBIDDEN_QUALIFIERS or _forbidden_function(part):
+                    raise SqlGuardError(f"Calls into {part}.* are not allowed.")
+        if _is_sequence_reference(node):
+            raise SqlGuardError("Sequence NEXTVAL/CURRVAL is not allowed in a read-only query.")
         if isinstance(node, exp.Lock) or (isinstance(node, exp.Select) and node.args.get("locks")):
             raise SqlGuardError("Row locking clauses (FOR UPDATE/SHARE) are not allowed.")
     return tree

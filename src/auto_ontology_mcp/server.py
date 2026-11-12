@@ -25,6 +25,13 @@ WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent
 WRITE_DESTRUCTIVE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False)
 CONNECT = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True)
 
+TABLES_ARG = (
+    "Tables and views to read, for very large schemas: case-insensitive globs such as ['SALES_*', 'HR.EMP*', "
+    "'!*_LOG'] (* and ? wildcards, % works like *, _ is literal, schema.table when the pattern has a dot, ! excludes). "
+    "Tables scanned earlier that fall outside the filter are kept, so a catalog can grow area by area. "
+    "['*'] reads everything. Default: the datasource's saved filter, else AUTO_ONTOLOGY_SCAN_TABLES, else all tables."
+)
+
 DatasourceArg = Annotated[
     str | None,
     Field(description="Datasource name. Optional when only one datasource is registered."),
@@ -175,25 +182,28 @@ def build_server(settings: Settings | None = None, service: OntologyService | No
                 str,
                 Field(
                     description="SQLAlchemy URL, e.g. sqlite:////abs/path/file.db, "
-                    "postgresql+psycopg://user:pass@host:5432/db, mysql+pymysql://user:pass@host/db, duckdb:///file.duckdb."
+                    "postgresql+psycopg://user:pass@host:5432/db, mysql+pymysql://user:pass@host/db, duckdb:///file.duckdb, "
+                    "oracle+oracledb://user:pass@host:1521/?service_name=ORCLPDB1."
                 ),
             ],
             description: Annotated[str | None, Field(description="What this database holds.")] = None,
             schemas: Annotated[list[str] | None, Field(description="Schemas to include (default: all non-system schemas).")] = None,
             scan: Annotated[bool, Field(description="Scan the schema right away.")] = True,
+            tables: Annotated[list[str] | None, Field(description=TABLES_ARG + " Saved with the datasource for later scans.")] = None,
         ) -> dict[str, Any]:
             """Register a database by SQLAlchemy URL, test the connection and, by default, scan it. Use it only
             when the user gives you a URL; never invent credentials. Connections are opened
             read-only and nothing is ever written to the database. Re-using a name replaces that
             datasource's URL. Fails with the driver or connection error if the database cannot
             be reached; use scan_datasource to re-read one that is already registered."""
-            return svc.add_datasource(name, url, description, schemas, scan)
+            return svc.add_datasource(name, url, description, schemas, scan, tables)
 
         @tool(WRITE)
         def scan_datasource(
             datasource: DatasourceArg = None,
             schemas: Annotated[list[str] | None, Field(description="Limit the scan to these schemas.")] = None,
             profile: Annotated[bool, Field(description="Sample rows to profile columns and test inferred joins.")] = True,
+            tables: Annotated[list[str] | None, Field(description=TABLES_ARG + " Applies to this scan only.")] = None,
         ) -> dict[str, Any]:
             """Re-read a registered database: tables, columns, declared keys, column profiles (samples,
             uniqueness, formats, small value sets) and undeclared keys inferred by name and
@@ -202,7 +212,7 @@ def build_server(settings: Settings | None = None, service: OntologyService | No
             attributes are kept; inferred relationships that lost their evidence are removed.
             Reports new tables and columns added to modeled tables; get_modeling_worklist returns
             both. Reads the database only."""
-            return svc.scan_datasource(datasource, schemas, profile)
+            return svc.scan_datasource(datasource, schemas, profile, tables)
 
     # ------------------------------------------------------------- modeling
     @tool(READ)

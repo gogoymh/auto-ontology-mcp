@@ -14,9 +14,9 @@ import yaml
 from sqlglot import exp
 
 from . import __version__, guidance
-from .catalog import Scanner
+from .catalog import Scanner, TableFilter
 from .config import Settings
-from .datasources import Connections, mask_url, normalize_url, short_error, sqlglot_dialect
+from .datasources import Connections, builtin_sources, mask_url, normalize_url, short_error, sqlglot_dialect
 from .errors import KnowledgeError, OntologyError  # noqa: F401 (re-exported)
 from .graph import JoinGraph, shared_parents
 from .inference import names_own_table
@@ -32,6 +32,11 @@ TERM_STATUSES = ("draft", "certified", "deprecated")
 SQL_ATTR_KINDS = ("measure", "filter", "dimension", "join", "query")
 SAMPLES_SHOWN = 3  # sample values per column in Term and table views (complete value sets are shown in full)
 SAMPLE_CHARS = 40
+# Missing driver module → the package extra that installs it.
+_DRIVER_EXTRAS = {
+    "psycopg": "postgres", "psycopg2": "postgres", "pymysql": "mysql", "duckdb_engine": "duckdb", "duckdb": "duckdb",
+    "oracledb": "oracle", "cx_Oracle": "oracle",
+}
 _MEASURE_WORDS = {"amount", "price", "cost", "total", "revenue", "sales", "qty", "quantity", "profit", "margin", "value", "spend", "fee", "tax", "balance", "salary", "income", "discount"}
 
 
@@ -54,7 +59,7 @@ class OntologyService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.store = Store(settings.store_path)
-        self.connections = Connections(settings.query_timeout_s)
+        self.connections = Connections(settings.query_timeout_s, oracle_client_lib=settings.oracle_client_lib)
         self.scanner = Scanner(self.store, self.connections, settings.profile_sample_rows)
         self.knowledge = Knowledge(self)
 
@@ -127,7 +132,8 @@ class OntologyService:
         return qtable(table.get("schema_name") or None, table["name"]).sql(dialect=self.dialect(ds))
 
     def _catalog_tables(self, ds: dict[str, Any]) -> list[tuple[str, str]]:
-        return [(t["schema_name"] or "", t["name"]) for t in self.store.tables(ds["id"])]
+        tables = [(t["schema_name"] or "", t["name"]) for t in self.store.tables(ds["id"])]
+        return tables + builtin_sources(ds.get("dialect"))
 
     def _run(self, ds: dict[str, Any], sql: str, max_rows: int | None = 1000) -> list[list[Any]]:
         return self.connections.run_readonly(ds, sql, max_rows=max_rows).rows
@@ -213,7 +219,10 @@ class OntologyService:
         }
 
     # ============================================================== datasources
-    def add_datasource(self, name: str, url: str, description: str | None = None, schemas: list[str] | None = None, scan: bool = True) -> dict[str, Any]:
+    def add_datasource(
+        self, name: str, url: str, description: str | None = None, schemas: list[str] | None = None, scan: bool = True,
+        tables: list[str] | None = None,
+    ) -> dict[str, Any]:
         if not self.settings.allow_datasource_tools:
             raise OntologyError("Adding datasources over MCP is disabled on this server (AUTO_ONTOLOGY_ALLOW_DATASOURCE_TOOLS=0).")
         name = (name or "").strip()
@@ -230,6 +239,7 @@ class OntologyService:
             "url": url,
             "description": description,
             "schemas": schemas or None,
+            "table_filter": [t.strip() for t in tables if t and t.strip()] or None if tables else None,
             "created_at": existing["created_at"] if existing else now(),
         }
         self.connections.forget(ds["id"])
@@ -237,9 +247,10 @@ class OntologyService:
             engine = self.connections.engine(ds)
             ds["dialect"] = engine.dialect.name
         except ModuleNotFoundError as exc:
+            extra = _DRIVER_EXTRAS.get((exc.name or "").split(".")[0], "postgres")
             raise OntologyError(
                 f"The database driver is not installed ({exc.name}). Install the matching extra, e.g. "
-                "`uvx --from 'auto-ontology-mcp[postgres]' …` or `pip install psycopg[binary]`."
+                f"`uvx --from 'auto-ontology-mcp[{extra}]' …` or `pip install 'auto-ontology-mcp[{extra}]'`."
             ) from exc
         except Exception as exc:  # noqa: BLE001
             raise OntologyError(f"Could not open the datasource: {short_error(exc)}") from exc
@@ -259,9 +270,24 @@ class OntologyService:
             result["next_step"] = "Call scan_datasource to read the schema."
         return result
 
-    def scan_datasource(self, datasource: str | None = None, schemas: list[str] | None = None, profile: bool = True) -> dict[str, Any]:
+    def _table_filter(self, ds: dict[str, Any], tables: list[str] | None) -> tuple[TableFilter | None, str | None]:
+        """The scan's table filter and where it came from: the call, the datasource or the environment."""
+        if ds["name"] == KNOWLEDGE_DS:
+            return None, None
+        for source, patterns in (("argument", tables), ("datasource", ds.get("table_filter")), ("env", self.settings.scan_tables)):
+            if patterns:
+                return TableFilter.parse(patterns), source
+        return None, None
+
+    def scan_datasource(
+        self, datasource: str | None = None, schemas: list[str] | None = None, profile: bool = True,
+        tables: list[str] | None = None,
+    ) -> dict[str, Any]:
         ds = self.ds(datasource)
-        summary = self.scanner.scan(ds, schemas=schemas, profile=profile)
+        table_filter, filter_source = self._table_filter(ds, tables)
+        summary = self.scanner.scan(ds, schemas=schemas, profile=profile, tables=table_filter)
+        if table_filter is not None:
+            summary["table_filter_source"] = filter_source
         ds = self.ds(ds["name"])
         gaps = self._modeling_gaps(ds)
         names = {t["id"]: _label(t["schema_name"], t["name"]) for t in gaps["tables"]}
@@ -918,7 +944,7 @@ class OntologyService:
                 guard_sources(tree, self._catalog_tables(ds))
             except SqlGuardError as exc:
                 raise OntologyError(f"{kind} attributes must be a full read-only SELECT: {exc}") from exc
-            probe = exp.select("*").from_(tree.subquery("_aoq")).limit(1).sql(dialect=dialect)
+            probe = exp.select("*").from_(tree.subquery("aoq")).limit(1).sql(dialect=dialect)
         else:
             if tbl is None:
                 raise OntologyError("This Term has no table, so a fragment cannot be checked. Use kind='query' with a full SELECT.")
@@ -926,11 +952,15 @@ class OntologyService:
             if kind == "filter":
                 probe = f"SELECT COUNT(*) FROM {frm} WHERE {expression}"
             else:
-                probe = f"SELECT {expression} AS value FROM {frm}" + (" LIMIT 1" if kind == "dimension" else "")
+                probe = f"SELECT {expression} AS value FROM {frm}"
             try:
-                guard_sources(guard_readonly(probe, dialect), self._catalog_tables(ds))
+                probe_tree = guard_readonly(probe, dialect)
+                guard_sources(probe_tree, self._catalog_tables(ds))
             except SqlGuardError as exc:
                 raise OntologyError(f"Expression is not a valid read-only fragment: {exc}") from exc
+            if kind == "dimension":
+                # Dialect-correct row limit (LIMIT, TOP or FETCH FIRST).
+                probe = probe_tree.limit(1).sql(dialect=dialect)
         try:
             rows = self._run(ds, probe, max_rows=1)
         except Exception as exc:  # noqa: BLE001
@@ -1734,6 +1764,7 @@ class OntologyService:
             attributes=self.store.attributes_for_datasource(ds["id"]),
             sql_attributes=self.store.sql_attributes_for_datasource(ds["id"]),
             run=lambda q: self._run(ds, q, max_rows=1000),
+            builtin_tables=builtin_sources(ds.get("dialect")),
         )
 
     def validate_sql(self, sql: str, datasource: str | None = None, question: str | None = None) -> dict[str, Any]:

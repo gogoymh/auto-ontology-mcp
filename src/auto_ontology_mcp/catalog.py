@@ -7,14 +7,24 @@ deterministic half of relationship resolution. Nothing here calls a model.
 
 from __future__ import annotations
 
+import fnmatch
 import logging
 from collections import defaultdict
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Iterable
 
 import sqlalchemy as sa
 
 from . import inference
-from .datasources import Connections, qualified_name, quote_ident, short_error, sqlglot_dialect
+from .datasources import (
+    Connections,
+    native_name,
+    qualified_name,
+    quote_ident,
+    scans_default_schema_only,
+    short_error,
+    sqlglot_dialect,
+)
 from .profiling import LOW_CARDINALITY_MAX, profile_rows
 from .sqlcheck import transpile
 from .store import Store, new_id, now
@@ -28,7 +38,7 @@ _SYSTEM_SCHEMAS = {
 
 
 def _default_schemas(inspector: sa.Inspector, backend: str) -> list[str | None]:
-    if backend in ("sqlite", "mysql", "mariadb"):
+    if scans_default_schema_only(backend):
         return [None]
     try:
         names = inspector.get_schema_names()
@@ -42,6 +52,58 @@ def _default_schemas(inspector: sa.Inspector, backend: str) -> list[str | None]:
 
 
 SQLITE_SHADOW_SUFFIXES = ("_data", "_idx", "_content", "_docsize", "_config")
+
+
+@dataclass(frozen=True)
+class TableFilter:
+    """Which tables and views a scan reads.
+
+    Patterns are case-insensitive globs (``*``, ``?``; ``%`` works like ``*``;
+    ``_`` is a literal character). A pattern with a dot matches
+    ``schema.table``, otherwise the table name. ``!pattern`` excludes. With
+    only exclusions, everything else is included.
+    """
+
+    include: tuple[str, ...]
+    exclude: tuple[str, ...]
+    given: tuple[str, ...] = ()
+
+    @classmethod
+    def parse(cls, patterns: str | Iterable[str] | None) -> "TableFilter | None":
+        if patterns is None:
+            return None
+        items = patterns.split(",") if isinstance(patterns, str) else list(patterns)
+        include: list[str] = []
+        exclude: list[str] = []
+        given: list[str] = []
+        for raw in items:
+            item = str(raw or "").strip()
+            negate = item.startswith("!")
+            item = item[1:].strip() if negate else item
+            if not item:
+                continue
+            given.append(f"!{item}" if negate else item)
+            pattern = item.replace("%", "*").casefold()
+            (exclude if negate else include).append(pattern)
+        if not exclude and (not include or "*" in include):
+            return None  # nothing given, or everything asked for
+        return cls(tuple(include), tuple(exclude), tuple(given))
+
+    @property
+    def patterns(self) -> list[str]:
+        """The patterns as written, for reports."""
+        return list(self.given) or [*self.include, *(f"!{p}" for p in self.exclude)]
+
+    @staticmethod
+    def _hit(pattern: str, schema: str, table: str) -> bool:
+        target = f"{schema}.{table}" if "." in pattern else table
+        return fnmatch.fnmatchcase(target, pattern)
+
+    def matches(self, schema: str | None, table: str) -> bool:
+        s, t = (schema or "").casefold(), table.casefold()
+        if self.include and not any(self._hit(p, s, t) for p in self.include):
+            return False
+        return not any(self._hit(p, s, t) for p in self.exclude)
 
 
 class Scanner:
@@ -67,15 +129,27 @@ class Scanner:
         schemas: list[str] | None = None,
         profile: bool = True,
         infer: bool = True,
+        tables: TableFilter | None = None,
     ) -> dict[str, Any]:
+        """Read the schema. With *tables*, only matching tables and views are read; tables
+        scanned earlier that fall outside the filter stay in the catalog untouched."""
         engine = self.connections.engine(ds)
         backend = engine.dialect.name
+        dialect = engine.dialect
+
+        def native(name: Any) -> Any:
+            return native_name(dialect, name)
+
+        def native_cols(names: list[Any] | None) -> list[Any]:
+            return [native(n) for n in names or []]
+
         inspector = sa.inspect(engine)
         wanted = schemas or ds.get("schemas") or None
         schema_list: list[str | None] = list(wanted) if wanted else _default_schemas(inspector, backend)
         warnings: list[str] = []
 
         extracted: list[dict[str, Any]] = []
+        skipped = 0
         shadow: set[str] = set()
         if backend == "sqlite":
             # FTS5 and other virtual tables keep their data in shadow tables (x_data, x_idx, ...); skip those.
@@ -97,6 +171,9 @@ class Scanner:
             for name, kind in names:
                 if backend == "sqlite" and (name.startswith("sqlite_") or name in shadow):
                     continue
+                if tables is not None and not tables.matches(native(schema), native(name)):
+                    skipped += 1
+                    continue
                 try:
                     cols = inspector.get_columns(name, schema=schema)
                     pk = (inspector.get_pk_constraint(name, schema=schema) or {}).get("constrained_columns") or []
@@ -108,17 +185,36 @@ class Scanner:
                     comment = (inspector.get_table_comment(name, schema=schema) or {}).get("text")
                 except Exception:
                     comment = None
+                # Store names as the database spells them (Oracle: CUSTOMERS, not customers).
+                cols = [{**c, "name": native(c["name"])} for c in cols]
+                fks = [
+                    {
+                        **fk,
+                        "constrained_columns": native_cols(fk.get("constrained_columns")),
+                        "referred_columns": native_cols(fk.get("referred_columns")),
+                        "referred_table": native(fk.get("referred_table")),
+                        "referred_schema": native(fk.get("referred_schema")),
+                    }
+                    for fk in fks
+                ]
                 extracted.append(
-                    {"schema": schema or "", "name": name, "kind": kind, "columns": cols, "pk": pk, "fks": fks, "comment": comment}
+                    {
+                        "schema": native(schema) or "", "name": native(name), "kind": kind, "columns": cols,
+                        "pk": native_cols(pk), "fks": fks, "comment": comment,
+                    }
                 )
 
-        table_ids = self._upsert_catalog(ds, extracted)
+        if tables is not None and not extracted:
+            warnings.append(f"The table filter {', '.join(tables.patterns)} matched no table or view.")
+        table_ids = self._upsert_catalog(ds, extracted, tables)
         self._sync_declared_fks(ds, extracted, table_ids, warnings)
 
         profiled = 0
         if profile:
+            # Only what this scan read: earlier areas of a filtered catalog are not re-profiled.
+            scanned = set(table_ids.values())
             for table in self.store.tables(ds["id"]):
-                if self._profile_table(ds, table, warnings):
+                if table["id"] in scanned and self._profile_table(ds, table, warnings):
                     profiled += 1
 
         inferred_summary: dict[str, Any] = {}
@@ -135,11 +231,14 @@ class Scanner:
             "tables": len(extracted),
             "columns": sum(len(t["columns"]) for t in extracted),
             "profiled_tables": profiled,
+            **({"table_filter": tables.patterns, "skipped_by_filter": skipped} if tables is not None else {}),
             **inferred_summary,
             "warnings": warnings[:30],
         }
 
-    def _upsert_catalog(self, ds: dict[str, Any], extracted: list[dict[str, Any]]) -> dict[tuple[str, str], str]:
+    def _upsert_catalog(
+        self, ds: dict[str, Any], extracted: list[dict[str, Any]], table_filter: TableFilter | None = None
+    ) -> dict[tuple[str, str], str]:
         existing = {(t["schema_name"], t["name"]): t for t in self.store.tables(ds["id"])}
         seen: dict[tuple[str, str], str] = {}
         with self.store.tx() as con:
@@ -196,7 +295,9 @@ class Scanner:
                     if name not in new_names:
                         con.execute("DELETE FROM catalog_column WHERE id = ?", (old["id"],))
             for key, row in existing.items():
-                if key not in seen:
+                # A table outside the filter was not looked at, so it is kept; only tables the
+                # scan covered and did not find are gone from the database.
+                if key not in seen and (table_filter is None or table_filter.matches(key[0], key[1])):
                     con.execute("DELETE FROM catalog_table WHERE id = ?", (row["id"],))
         return seen
 

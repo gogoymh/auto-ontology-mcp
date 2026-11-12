@@ -25,6 +25,10 @@ def _int(name: str, default: int) -> int:
 TOOLSETS = ("answer", "model", "knowledge", "share")
 
 
+def _patterns(raw: str | None) -> tuple[str, ...]:
+    return tuple(p.strip() for p in (raw or "").split(",") if p.strip())
+
+
 def _toolsets(raw: str | None) -> frozenset[str]:
     if not raw or raw.strip().lower() == "all":
         return frozenset(TOOLSETS)
@@ -64,6 +68,15 @@ class Settings:
     vault: Path | None = None
     """Obsidian vault for originals (AUTO_ONTOLOGY_VAULT). Unset: the knowledge export folder is the vault."""
 
+    oracle_client_lib: str | None = None
+    """Oracle thick mode (AUTO_ONTOLOGY_ORACLE_CLIENT_LIB): an Instant Client directory, or 1 to use the
+    client found on the library path. Unset: python-oracledb thin mode (Oracle 12.1+, no client install)."""
+
+    scan_tables: tuple[str, ...] = ()
+    """Default table filter for scans (AUTO_ONTOLOGY_SCAN_TABLES, comma-separated globs such as
+    ``SALES_*,HR.EMP*,!*_LOG``). Empty: every table. A datasource's own filter or the scan's
+    ``tables`` argument takes precedence."""
+
     toolsets: frozenset[str] = frozenset({"answer", "model", "knowledge", "share"})
     """Tool groups to expose (AUTO_ONTOLOGY_TOOLSETS, comma-separated; default all). A client that only
     asks questions of modeled databases needs 'answer'; fewer tools leave the model more context."""
@@ -84,4 +97,6 @@ class Settings:
             port=_int("AUTO_ONTOLOGY_MCP_PORT", 8765),
             vault=Path(os.environ["AUTO_ONTOLOGY_VAULT"]).expanduser() if os.environ.get("AUTO_ONTOLOGY_VAULT") else None,
             toolsets=_toolsets(os.environ.get("AUTO_ONTOLOGY_TOOLSETS")),
+            oracle_client_lib=os.environ.get("AUTO_ONTOLOGY_ORACLE_CLIENT_LIB") or None,
+            scan_tables=_patterns(os.environ.get("AUTO_ONTOLOGY_SCAN_TABLES")),
         )

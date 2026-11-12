@@ -21,7 +21,8 @@ dependencies = [
 postgres = ["psycopg[binary]>=3.2"]
 mysql = ["pymysql>=1.1"]
 duckdb = ["duckdb-engine>=0.15"]
-all = ["psycopg[binary]>=3.2", "pymysql>=1.1", "duckdb-engine>=0.15"]
+oracle = ["oracledb>=2.0"]
+all = ["psycopg[binary]>=3.2", "pymysql>=1.1", "duckdb-engine>=0.15", "oracledb>=2.0"]
 
 [project.scripts]
 auto-ontology-mcp = "auto_ontology_mcp.__main__:main"

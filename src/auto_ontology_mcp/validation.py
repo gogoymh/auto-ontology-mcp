@@ -50,6 +50,7 @@ class Validator:
         attributes: list[dict[str, Any]],
         sql_attributes: list[dict[str, Any]],
         run: Callable[[str], list[list[Any]]],
+        builtin_tables: list[tuple[str, str]] | None = None,
     ) -> None:
         self.dialect = dialect
         self.catalog_columns = catalog_columns
@@ -63,6 +64,9 @@ class Validator:
                 c.get("schema_name") or "",
                 c["table_name"],
             )
+        # Engine pseudo-tables such as Oracle's DUAL: readable, but not catalog tables.
+        for schema, name in builtin_tables or []:
+            self.tables.setdefault((schema.casefold(), name.casefold()), (schema, name))
         self.rels = relationships
         self.attributes = attributes
         self.rel_columns = {r["source_column_id"] for r in relationships} | {r["target_column_id"] for r in relationships}
@@ -591,7 +595,7 @@ class Validator:
 
     def _dry_run(self, tree: exp.Expression, errors: list[str]) -> None:
         try:
-            wrapped = exp.select("*").from_(tree.copy().subquery("_aoq")).limit(0)
+            wrapped = exp.select("*").from_(tree.copy().subquery("aoq")).limit(0)
             self.run(wrapped.sql(dialect=self.dialect))
         except Exception as exc:  # noqa: BLE001
             errors.append(f"The database rejected the query: {str(getattr(exc, 'orig', None) or exc).splitlines()[0][:400]}")
