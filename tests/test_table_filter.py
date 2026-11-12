@@ -136,3 +136,18 @@ def test_knowledge_store_ignores_the_env_filter(settings):
     svc.knowledge.define_entity("Book", [{"name": "isbn", "type": "text"}, {"name": "title", "type": "text"}], keys=["isbn"])
     assert any(t["name"] == "book" for t in svc.store.tables(svc.ds("knowledge")["id"]))
     assert svc._table_filter(svc.ds("knowledge"), None) == (None, None)
+
+
+def test_re_adding_a_datasource_keeps_its_saved_filter(settings, demo_path):
+    """Review of #14: re-adding without tables (e.g. to change the password) reset the filter to every table."""
+    svc = OntologyService(settings)
+    url = f"sqlite:///{demo_path}"
+    svc.add_datasource("demo", url, tables=["regions", "states"])
+    out = svc.add_datasource("demo", url, description="new password")
+    assert svc.ds()["table_filter"] == ["regions", "states"]
+    assert out["scan"]["table_filter_source"] == "datasource"
+    assert names(svc) == {"regions", "states"}
+
+    out = svc.add_datasource("demo", url, tables=["*"])  # the explicit way to read everything again
+    assert "table_filter" not in out["scan"]
+    assert {"orders", "customers", "regions"} <= names(svc)

@@ -11,11 +11,13 @@ Every statement that reaches a source database goes through
    ``SET TRANSACTION READ ONLY`` at the start of every transaction);
 3. the transaction is always rolled back, never committed.
 
-Names are kept the way the database stores them. Oracle (and other engines
-SQLAlchemy marks ``requires_name_normalize``) store unquoted names in upper
-case; SQLAlchemy lowercases them on reflection and in result keys.
-:func:`native_name` undoes that so quoted probes such as ``"CUSTOMERS"`` and
-result column names match the catalog exactly.
+On Oracle, names are kept the way the database stores them. Oracle stores
+unquoted names in upper case; SQLAlchemy lowercases them on reflection and in
+result keys. :func:`native_name` undoes that so quoted probes such as
+``"CUSTOMERS"`` and result column names match the catalog exactly. Other
+dialects that normalize names (Snowflake, DB2) keep SQLAlchemy's spelling:
+renaming an existing lowercase catalog there would delete its tables, and with
+them the Terms' column mappings, on the next scan.
 """
 
 from __future__ import annotations
@@ -100,13 +102,18 @@ def ping_sql(backend: str | None) -> str:
     return "SELECT 1 FROM DUAL" if (backend or "").split("+")[0].lower() == "oracle" else "SELECT 1"
 
 
+def keeps_native_names(dialect: sa.Dialect) -> bool:
+    """Whether the catalog stores the database's own spelling (Oracle only; see the module docstring)."""
+    return dialect.name == "oracle"
+
+
 def native_name(dialect: sa.Dialect, name: Any) -> Any:
-    """The name as the database stores it.
+    """The name as the database stores it (Oracle); other dialects get *name* back unchanged.
 
     Pass the names the inspector returns (``quoted_name`` objects), so a name
     that really is lower case in Oracle stays lower case.
     """
-    if name is None or not getattr(dialect, "requires_name_normalize", False):
+    if name is None or not keeps_native_names(dialect):
         return name
     return str(dialect.denormalize_name(name))
 
@@ -266,7 +273,7 @@ class Connections:
                 result = con.execute(sa.text(sql), params or {})
                 if not result.returns_rows:
                     return QueryResult(columns=[], rows=[], truncated=False)
-                if engine.dialect.requires_name_normalize and result.cursor is not None:
+                if keeps_native_names(engine.dialect) and result.cursor is not None:
                     # Raw names (CUSTOMER_ID), matching the catalog, not SQLAlchemy's lowercased keys.
                     columns = [d[0] for d in result.cursor.description]
                 else:

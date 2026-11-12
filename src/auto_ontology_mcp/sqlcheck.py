@@ -217,7 +217,7 @@ def guard_readonly(sql: str, dialect: str | None) -> exp.Expression:
             for part in [*_qualifier_segments(node), *name.split(".")[:-1]]:
                 if part in _FORBIDDEN_QUALIFIERS or _forbidden_function(part):
                     raise SqlGuardError(f"Calls into {part}.* are not allowed.")
-        if _is_sequence_reference(node):
+        if dialect == "oracle" and _is_sequence_reference(node):  # elsewhere t.nextval is just a column
             raise SqlGuardError("Sequence NEXTVAL/CURRVAL is not allowed in a read-only query.")
         if isinstance(node, exp.Lock) or (isinstance(node, exp.Select) and node.args.get("locks")):
             raise SqlGuardError("Row locking clauses (FOR UPDATE/SHARE) are not allowed.")

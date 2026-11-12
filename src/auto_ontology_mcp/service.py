@@ -239,7 +239,10 @@ class OntologyService:
             "url": url,
             "description": description,
             "schemas": schemas or None,
-            "table_filter": [t.strip() for t in tables if t and t.strip()] or None if tables else None,
+            # Re-adding a datasource (say, a new password) keeps its saved filter; ['*'] clears it.
+            "table_filter": (
+                [t.strip() for t in tables if t and t.strip()] or None if tables else (existing or {}).get("table_filter")
+            ),
             "created_at": existing["created_at"] if existing else now(),
         }
         self.connections.forget(ds["id"])

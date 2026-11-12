@@ -31,6 +31,8 @@ from auto_ontology_mcp.datasources import (
 from auto_ontology_mcp.service import OntologyError, OntologyService
 from auto_ontology_mcp.sqlcheck import SqlGuardError, guard_readonly, guard_sources
 
+from conftest import DEMO_TERMS
+
 ORA_URL = os.environ.get("AO_TEST_ORACLE_URL")
 ORDER = ["regions", "states", "cities", "employees", "customers", "product_categories", "products", "tags", "product_tags", "orders", "order_lines"]
 
@@ -58,6 +60,38 @@ def test_native_name_restores_oracle_spelling():
     assert native_name(d, "hr") == "HR"  # a schema typed by the user
     assert native_name(d, None) is None
     assert native_name(PGDialect(), "customers") == "customers"
+
+
+def test_native_names_are_oracle_only():
+    pg = PGDialect()
+    pg.requires_name_normalize = True  # Snowflake and DB2 normalize names too; they must stay as before
+    assert native_name(pg, "customers") == "customers"
+
+
+def test_rescan_on_a_name_normalizing_dialect_keeps_reviewed_work(svc):
+    """Review of #14: a lowercase catalog on a dialect that normalizes names (Snowflake, DB2) was renamed
+    to upper case on rescan, which deleted the old tables and, by cascade, every column mapping."""
+    for table in ("customers", "orders"):
+        svc.save_table_terms(table, DEMO_TERMS[table])
+    ds = svc.ds()
+    mappings = len(svc.store.attributes_for_datasource(ds["id"]))
+    linked = {t["name"]: t["primary_table_id"] for t in svc.store.terms(ds["id"])}
+    assert mappings and all(linked.values())
+
+    svc.connections.engine(ds).dialect.requires_name_normalize = True
+    out = svc.scan_datasource()
+    assert not out["warnings"]
+    assert {"customers", "orders"} <= {t["name"] for t in svc.store.tables(ds["id"])}
+    assert len(svc.store.attributes_for_datasource(ds["id"])) == mappings
+    assert {t["name"]: t["primary_table_id"] for t in svc.store.terms(ds["id"])} == linked
+
+
+@pytest.mark.parametrize("dialect", ["sqlite", "postgres"])
+def test_currval_and_nextval_are_ordinary_columns_elsewhere(dialect):
+    sql = "SELECT t.currval, t.nextval FROM customers t"
+    guard_sources(guard_readonly(sql, dialect), [("", "customers")])
+    with pytest.raises(SqlGuardError, match="Sequence"):
+        guard_readonly(sql, "oracle")
 
 
 @pytest.mark.parametrize(
