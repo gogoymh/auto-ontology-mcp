@@ -15,6 +15,7 @@ from sqlglot import exp
 from sqlglot.errors import ErrorLevel
 from sqlglot.optimizer.qualify import qualify
 from sqlglot.optimizer.scope import Scope, traverse_scope
+from sqlglot.schema import MappingSchema
 
 
 class SqlGuardError(ValueError):
@@ -400,12 +401,16 @@ def analyze(sql_or_tree: str | exp.Expression, columns: list[dict[str, Any]], di
                 break
     analysis = Analysis(tree=tree, qualified=False)
     try:
+        # sqlglot lowercases the catalog's names for a dialect that folds unquoted identifiers, and
+        # then a correctly quoted "OrderDate" no longer resolves. For those dialects the catalog
+        # keeps its exact spelling, as the database does.
+        exact = (dialect or "").lower() in ("postgres", "redshift")
         working = tree.copy()
         if dialect == "oracle":
             working = _mark_oracle_pseudocolumns(working, columns)
         qualified = qualify(
             working,
-            schema=mapping,
+            schema=MappingSchema(mapping, dialect=dialect, normalize=not exact),  
             dialect=dialect,
             db=default_db,
             validate_qualify_columns=True,

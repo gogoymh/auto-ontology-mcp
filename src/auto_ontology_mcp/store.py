@@ -366,7 +366,7 @@ class Store:
     def columns_for_datasource(self, datasource_id: str) -> list[dict[str, Any]]:
         return self.all(
             """
-            SELECT c.*, t.name AS table_name, t.schema_name AS schema_name
+            SELECT c.*, t.name AS table_name, t.schema_name AS schema_name, t.pk AS table_pk
             FROM catalog_column c JOIN catalog_table t ON t.id = c.table_id
             WHERE t.datasource_id = ?
             ORDER BY t.schema_name, t.name, c.ordinal
