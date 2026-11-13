@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterable
 
 
 def _bool(name: str, default: bool) -> bool:
@@ -25,8 +26,20 @@ def _int(name: str, default: int) -> int:
 TOOLSETS = ("answer", "model", "knowledge", "share")
 
 
+def split_patterns(value: str | Iterable[str] | None) -> list[str]:
+    """Table filter patterns from a comma-separated string or a list, stripped, blanks dropped.
+
+    Every entry point (env, CLI, MCP arguments, the saved filter) splits with this, so blank
+    input means "not given" everywhere.
+    """
+    if value is None:
+        return []
+    items = value.split(",") if isinstance(value, str) else [part for v in value for part in str(v or "").split(",")]
+    return [p.strip() for p in items if p.strip()]
+
+
 def _patterns(raw: str | None) -> tuple[str, ...]:
-    return tuple(p.strip() for p in (raw or "").split(",") if p.strip())
+    return tuple(split_patterns(raw))
 
 
 def _toolsets(raw: str | None) -> frozenset[str]:
@@ -70,7 +83,8 @@ class Settings:
 
     oracle_client_lib: str | None = None
     """Oracle thick mode (AUTO_ONTOLOGY_ORACLE_CLIENT_LIB): an Instant Client directory, or 1 to use the
-    client found on the library path. Unset: python-oracledb thin mode (Oracle 12.1+, no client install)."""
+    client found on the library path, for servers that enforce native network encryption. Unset: python-oracledb
+    thin mode (no client install). Both modes need Oracle 12.1+."""
 
     scan_tables: tuple[str, ...] = ()
     """Default table filter for scans (AUTO_ONTOLOGY_SCAN_TABLES, comma-separated globs such as

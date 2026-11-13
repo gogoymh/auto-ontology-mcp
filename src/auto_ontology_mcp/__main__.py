@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from .config import split_patterns
 
 
 TABLES_HELP = (
@@ -137,7 +138,7 @@ def cmd_scan(args: argparse.Namespace) -> None:
 
 
 def _split(raw: str | None) -> list[str] | None:
-    return [p.strip() for p in raw.split(",") if p.strip()] or None if raw else None
+    return split_patterns(raw) or None
 
 
 def cmd_list(_: argparse.Namespace) -> None:

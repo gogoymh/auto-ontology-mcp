@@ -40,6 +40,19 @@ def literal(value: Any) -> exp.Expression:
     return exp.Literal.string(str(value))
 
 
+def limited(tree: exp.Expression, n: int, dialect: str | None) -> exp.Expression:
+    """*tree* with at most *n* rows, for dry runs and probes.
+
+    Usually ``SELECT * FROM (<query>) aoq`` with a row limit. Oracle refuses that wrap
+    when two output columns share a name (ORA-00918, as in ``SELECT o.id, c.id``), so
+    there the limit goes on the statement itself: sqlglot renders it as a trailing
+    ``FETCH FIRST n ROWS ONLY``, also after an ORDER BY or a UNION.
+    """
+    if dialect == "oracle" and isinstance(tree, (exp.Select, exp.SetOperation)):
+        return tree.copy().limit(n)
+    return exp.select("*").from_(tree.copy().subquery("aoq")).limit(n)
+
+
 class Validator:
     def __init__(
         self,
@@ -595,8 +608,7 @@ class Validator:
 
     def _dry_run(self, tree: exp.Expression, errors: list[str]) -> None:
         try:
-            wrapped = exp.select("*").from_(tree.copy().subquery("aoq")).limit(0)
-            self.run(wrapped.sql(dialect=self.dialect))
+            self.run(limited(tree, 0, self.dialect).sql(dialect=self.dialect))
         except Exception as exc:  # noqa: BLE001
             errors.append(f"The database rejected the query: {str(getattr(exc, 'orig', None) or exc).splitlines()[0][:400]}")
 

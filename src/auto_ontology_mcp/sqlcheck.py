@@ -105,7 +105,8 @@ _FORBIDDEN_FUNCTIONS = frozenset(
     }
 )
 
-# Owners / packages whose members must not be called by qualified name (Oracle: sys.dbms_*, ctxsys.*).
+# Oracle owners whose members must not be called by qualified name (sys.dbms_*, ctxsys.*). Oracle
+# only: on MySQL and SQL Server, sys.* holds harmless helpers and a user schema may be called sys.
 _FORBIDDEN_QUALIFIERS = frozenset({"sys", "ctxsys", "ordsys", "mdsys", "xdb", "wmsys", "lbacsys", "dvsys", "olapsys"})
 # Pseudo-columns that advance or read a sequence (seq.NEXTVAL changes state).
 _SEQUENCE_PSEUDOCOLUMNS = frozenset({"nextval", "currval"})
@@ -147,6 +148,38 @@ def _qualifier_segments(func: exp.Expression) -> list[str]:
     head = top.sql().split("(", 1)[0]
     parts = [p.strip().strip('"`[]').lower() for p in head.split(".")]
     return [p for p in parts[:-1] if p]
+
+
+_ORACLE_PACKAGE_PREFIXES = ("dbms_", "utl_")
+
+
+def _forbidden_qualifier(part: str, dialect: str | None) -> bool:
+    return dialect == "oracle" and part in _FORBIDDEN_QUALIFIERS
+
+
+def _query_names(tree: exp.Expression) -> set[str]:
+    """Table names, aliases and CTE names the query defines; a column qualified by one is a real column."""
+    names = {cte.alias_or_name.casefold() for cte in tree.find_all(exp.CTE)}
+    for table in tree.find_all(exp.Table):
+        names.add(table.name.casefold())
+        if table.alias:
+            names.add(table.alias.casefold())
+    for sub in tree.find_all(exp.Subquery):
+        if sub.alias:
+            names.add(sub.alias.casefold())
+    return names
+
+
+def _package_column(column: exp.Column, defined: set[str]) -> str | None:
+    """Oracle calls a zero-argument package function without parentheses (``utl_inaddr.get_host_name``),
+    which parses as a qualified column. Returns the offending qualifier, if any."""
+    for part in column.parts[:-1]:
+        name = part.name.casefold()
+        if name in defined:
+            continue
+        if name in _FORBIDDEN_QUALIFIERS or name.startswith(_ORACLE_PACKAGE_PREFIXES):
+            return name
+    return None
 
 
 def _is_sequence_reference(node: exp.Expression) -> bool:
@@ -205,6 +238,7 @@ def guard_readonly(sql: str, dialect: str | None) -> exp.Expression:
         raise SqlGuardError(
             f"Only SELECT queries are allowed (got {type(tree).__name__.upper()})."
         )
+    defined = _query_names(tree) if dialect == "oracle" else set()
     for node in tree.walk():
         if isinstance(node, _FORBIDDEN_NODES):
             raise SqlGuardError(f"{type(node).__name__.upper()} is not allowed in a read-only query.")
@@ -215,8 +249,10 @@ def guard_readonly(sql: str, dialect: str | None) -> exp.Expression:
             if _forbidden_function(name):
                 raise SqlGuardError(f"Function {name}() is not allowed.")
             for part in [*_qualifier_segments(node), *name.split(".")[:-1]]:
-                if part in _FORBIDDEN_QUALIFIERS or _forbidden_function(part):
+                if _forbidden_qualifier(part, dialect) or _forbidden_function(part):
                     raise SqlGuardError(f"Calls into {part}.* are not allowed.")
+        if dialect == "oracle" and isinstance(node, exp.Column) and (part := _package_column(node, defined)):
+            raise SqlGuardError(f"Calls into {part}.* are not allowed.")
         if dialect == "oracle" and _is_sequence_reference(node):  # elsewhere t.nextval is just a column
             raise SqlGuardError("Sequence NEXTVAL/CURRVAL is not allowed in a read-only query.")
         if isinstance(node, exp.Lock) or (isinstance(node, exp.Select) and node.args.get("locks")):
@@ -334,6 +370,23 @@ def _column_side(node: exp.Expression) -> exp.Column | None:
     return node if isinstance(node, exp.Column) else None
 
 
+# Oracle pseudo-columns and niladic functions written without parentheses (SELECT USER FROM DUAL).
+# sqlglot parses them as columns, which then fail to resolve against the catalog.
+_ORACLE_PSEUDOCOLUMNS = frozenset(
+    {"user", "uid", "rownum", "rowid", "level", "ora_rowscn", "systimestamp", "localtimestamp", "sessiontimezone", "dbtimezone"}
+)
+
+
+def _mark_oracle_pseudocolumns(tree: exp.Expression, columns: list[dict[str, Any]]) -> exp.Expression:
+    """Turn unqualified Oracle pseudo-columns into plain variables, unless a catalog column has that name."""
+    real = {c["name"].casefold() for c in columns}
+    for col in list(tree.find_all(exp.Column)):
+        name = col.name.casefold()
+        if not col.table and name in _ORACLE_PSEUDOCOLUMNS and name not in real:
+            col.replace(exp.Var(this=col.name))
+    return tree
+
+
 def analyze(sql_or_tree: str | exp.Expression, columns: list[dict[str, Any]], dialect: str | None) -> Analysis:
     """Qualify the query against the catalog and collect what validation needs."""
     tree = sqlglot.parse_one(sql_or_tree, read=dialect) if isinstance(sql_or_tree, str) else sql_or_tree
@@ -347,8 +400,11 @@ def analyze(sql_or_tree: str | exp.Expression, columns: list[dict[str, Any]], di
                 break
     analysis = Analysis(tree=tree, qualified=False)
     try:
+        working = tree.copy()
+        if dialect == "oracle":
+            working = _mark_oracle_pseudocolumns(working, columns)
         qualified = qualify(
-            tree.copy(),
+            working,
             schema=mapping,
             dialect=dialect,
             db=default_db,

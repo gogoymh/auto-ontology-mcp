@@ -15,8 +15,16 @@ from sqlglot import exp
 
 from . import __version__, guidance
 from .catalog import Scanner, TableFilter
-from .config import Settings
-from .datasources import Connections, builtin_sources, mask_url, normalize_url, short_error, sqlglot_dialect
+from .config import Settings, split_patterns
+from .datasources import (
+    Connections,
+    builtin_columns,
+    builtin_sources,
+    mask_url,
+    normalize_url,
+    short_error,
+    sqlglot_dialect,
+)
 from .errors import KnowledgeError, OntologyError  # noqa: F401 (re-exported)
 from .graph import JoinGraph, shared_parents
 from .inference import names_own_table
@@ -26,7 +34,7 @@ from .profiling import is_numeric_type
 from .search import build_docs, search
 from .sqlcheck import SqlGuardError, analyze, extract_expressions, guard_readonly, guard_sources, normalize_sql
 from .store import Store, new_id, now
-from .validation import Validator, qtable
+from .validation import Validator, limited, qtable
 
 TERM_STATUSES = ("draft", "certified", "deprecated")
 SQL_ATTR_KINDS = ("measure", "filter", "dimension", "join", "query")
@@ -240,9 +248,7 @@ class OntologyService:
             "description": description,
             "schemas": schemas or None,
             # Re-adding a datasource (say, a new password) keeps its saved filter; ['*'] clears it.
-            "table_filter": (
-                [t.strip() for t in tables if t and t.strip()] or None if tables else (existing or {}).get("table_filter")
-            ),
+            "table_filter": split_patterns(tables) or (existing or {}).get("table_filter") or None,
             "created_at": existing["created_at"] if existing else now(),
         }
         self.connections.forget(ds["id"])
@@ -278,7 +284,7 @@ class OntologyService:
         if ds["name"] == KNOWLEDGE_DS:
             return None, None
         for source, patterns in (("argument", tables), ("datasource", ds.get("table_filter")), ("env", self.settings.scan_tables)):
-            if patterns:
+            if split_patterns(patterns):  # blank input counts as not given
                 return TableFilter.parse(patterns), source
         return None, None
 
@@ -947,7 +953,7 @@ class OntologyService:
                 guard_sources(tree, self._catalog_tables(ds))
             except SqlGuardError as exc:
                 raise OntologyError(f"{kind} attributes must be a full read-only SELECT: {exc}") from exc
-            probe = exp.select("*").from_(tree.subquery("aoq")).limit(1).sql(dialect=dialect)
+            probe = limited(tree, 1, dialect).sql(dialect=dialect)
         else:
             if tbl is None:
                 raise OntologyError("This Term has no table, so a fragment cannot be checked. Use kind='query' with a full SELECT.")
@@ -1757,7 +1763,7 @@ class OntologyService:
         }
 
     def _validator(self, ds: dict[str, Any]) -> Validator:
-        columns = self.store.columns_for_datasource(ds["id"])
+        columns = self.store.columns_for_datasource(ds["id"]) + builtin_columns(ds.get("dialect"))
         if self.knowledge.is_knowledge(ds):
             columns = columns + self.knowledge.index.pseudo_columns(columns)
         return Validator(

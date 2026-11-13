@@ -87,24 +87,47 @@ def mask_url(url: str) -> str:
 _DEFAULT_SCHEMA_ONLY = frozenset({"sqlite", "mysql", "mariadb", "oracle"})
 
 
+def _backend(backend: str | None) -> str:
+    return (backend or "").split("+")[0].lower()
+
+
+def is_oracle(backend: str | None) -> bool:
+    """*backend* is a dialect or URL driver name (``oracle``, ``oracle+oracledb``)."""
+    return _backend(backend) == "oracle"
+
+
 def scans_default_schema_only(backend: str | None) -> bool:
-    return (backend or "").split("+")[0].lower() in _DEFAULT_SCHEMA_ONLY
+    return _backend(backend) in _DEFAULT_SCHEMA_ONLY
 
 
 def builtin_sources(backend: str | None) -> list[tuple[str, str]]:
     """Row sources every query may read besides the catalog (Oracle's one-row ``DUAL``)."""
-    if (backend or "").split("+")[0].lower() == "oracle":
-        return [("", "DUAL"), ("SYS", "DUAL")]
-    return []
+    return [("", "DUAL"), ("SYS", "DUAL")] if is_oracle(backend) else []
+
+
+def builtin_columns(backend: str | None) -> list[dict[str, Any]]:
+    """Catalog-shaped columns of the builtin row sources, so validation can resolve ``DUAL.DUMMY``.
+
+    Only the unqualified ``DUAL``: a second, SYS-qualified copy would make every unqualified
+    name in the validation schema ambiguous.
+    """
+    if not is_oracle(backend):
+        return []
+    return [
+        {
+            "id": "builtin:DUAL:DUMMY", "table_id": None, "schema_name": "", "table_name": "DUAL",
+            "name": "DUMMY", "data_type": "VARCHAR2(1)", "pseudo": True,
+        }
+    ]
 
 
 def ping_sql(backend: str | None) -> str:
-    return "SELECT 1 FROM DUAL" if (backend or "").split("+")[0].lower() == "oracle" else "SELECT 1"
+    return "SELECT 1 FROM DUAL" if is_oracle(backend) else "SELECT 1"
 
 
 def keeps_native_names(dialect: sa.Dialect) -> bool:
     """Whether the catalog stores the database's own spelling (Oracle only; see the module docstring)."""
-    return dialect.name == "oracle"
+    return is_oracle(dialect.name)
 
 
 def native_name(dialect: sa.Dialect, name: Any) -> Any:
@@ -153,7 +176,7 @@ def _readonly_engine(url: str, timeout_s: int, oracle_client_lib: str | None = N
     elif backend == "oracle":
         thick = _thick_mode(oracle_client_lib)
         if thick is not None and parsed.get_driver_name() == "oracledb":
-            # Thick mode (Oracle Instant Client) for 11g or servers that enforce native network encryption.
+            # Thick mode (Oracle Instant Client) for servers that enforce native network encryption.
             engine_args["thick_mode"] = thick
 
     engine = sa.create_engine(parsed, connect_args=connect_args, pool_pre_ping=True, **engine_args)

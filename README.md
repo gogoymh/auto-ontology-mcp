@@ -397,8 +397,9 @@ The same patterns work as `tables=[...]` on the `add_datasource` and `scan_datas
 - **Knowledge store.** The built-in `knowledge` store is never filtered.
 
 **Oracle notes.**
-- `python-oracledb` runs in thin mode by default, which needs no Oracle client but requires Oracle Database 12.1 or later.
-- For 11g, or for servers that enforce native network encryption, install Oracle Instant Client and set `AUTO_ONTOLOGY_ORACLE_CLIENT_LIB` to its directory (or to `1` if it is on the library path). This switches the driver to thick mode.
+- Oracle Database 12.1 or later is required. Row limits are written as `FETCH FIRST n ROWS ONLY`, which 11g does not understand, so 11g is not supported in either driver mode.
+- `python-oracledb` runs in thin mode by default, which needs no Oracle client.
+- For servers that enforce native network encryption, install Oracle Instant Client and set `AUTO_ONTOLOGY_ORACLE_CLIENT_LIB` to its directory (or to `1` if it is on the library path). This switches the driver to thick mode.
 - A scan covers the login user's schema. Pass `--schemas HR,SALES` (or `schemas=[...]`) to scan other owners'.
 - Application schemas often hold thousands of tables. Scan only the areas you model with a table filter (see [Large schemas](#large-schemas)).
 - The catalog keeps Oracle's own spelling (`CUSTOMERS`, `CUSTOMER_ID`), so unquoted lowercase SQL works as it does in SQL*Plus.
@@ -642,7 +643,7 @@ Over HTTP, a token is required to reach the server from anywhere but localhost: 
 | `AUTO_ONTOLOGY_MAX_ROWS` | `500` | Upper bound on rows `run_sql` returns |
 | `AUTO_ONTOLOGY_QUERY_TIMEOUT_S` | `30` | Per-query timeout in seconds |
 | `AUTO_ONTOLOGY_SCAN_TABLES` | unset | Default table filter for scans, comma-separated globs (`SALES_*,HR.EMP*,!*_LOG`). Unset: every table. See [Large schemas](#large-schemas) |
-| `AUTO_ONTOLOGY_ORACLE_CLIENT_LIB` | unset | Oracle thick mode: Instant Client directory, or `1` for the client on the library path. Unset: thin mode |
+| `AUTO_ONTOLOGY_ORACLE_CLIENT_LIB` | unset | Oracle thick mode (for native network encryption): Instant Client directory, or `1` for the client on the library path. Unset: thin mode. Both need Oracle 12.1+ |
 | `AUTO_ONTOLOGY_PROFILE_ROWS` | `1000` | Rows sampled per table while profiling |
 | `AUTO_ONTOLOGY_ALLOW_DATASOURCE_TOOLS` | `1` | `0` hides `add_datasource` and `scan_datasource` from MCP |
 | `AUTO_ONTOLOGY_TOOLSETS` | `all` | Tool groups to expose, comma-separated: `answer` (always on), `model`, `knowledge`, `share` |

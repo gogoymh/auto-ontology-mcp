@@ -22,7 +22,9 @@ from sqlalchemy.dialects.postgresql.base import PGDialect
 from sqlglot import exp
 
 from auto_ontology_mcp.datasources import (
+    builtin_columns,
     builtin_sources,
+    is_oracle,
     native_name,
     normalize_url,
     ping_sql,
@@ -30,6 +32,7 @@ from auto_ontology_mcp.datasources import (
 )
 from auto_ontology_mcp.service import OntologyError, OntologyService
 from auto_ontology_mcp.sqlcheck import SqlGuardError, guard_readonly, guard_sources
+from auto_ontology_mcp.validation import Validator, limited
 
 from conftest import DEMO_TERMS
 
@@ -46,6 +49,7 @@ def test_bare_oracle_url_uses_oracledb():
 
 
 def test_backend_helpers():
+    assert is_oracle("oracle") and is_oracle("oracle+oracledb") and is_oracle("ORACLE") and not is_oracle(None)
     assert ping_sql("oracle") == "SELECT 1 FROM DUAL"
     assert ping_sql("postgresql") == "SELECT 1"
     assert scans_default_schema_only("oracle") and not scans_default_schema_only("postgresql")
@@ -104,6 +108,9 @@ def test_currval_and_nextval_are_ordinary_columns_elsewhere(dialect):
         "SELECT httpuritype('http://example.com').getclob() FROM orders",
         "SELECT xmltype(bfilename('DIR', 'f.xml')) FROM orders",
         "SELECT order_seq.nextval FROM orders",
+        "SELECT utl_inaddr.get_host_name FROM dual",  # package function without parentheses
+        "SELECT sys.dbms_xmlgen.getxml FROM dual",
+        "SELECT o.status, dbms_session.unique_session_id FROM orders o",
         "SELECT * FROM orders FOR UPDATE",
         "DELETE FROM orders",
         "BEGIN NULL; END;",
@@ -121,10 +128,77 @@ def test_oracle_guard_rejects(sql):
         "SELECT o.status, COUNT(*) FROM orders o GROUP BY o.status FETCH FIRST 5 ROWS ONLY",
         "SELECT * FROM orders WHERE ROWNUM <= 5",
         "SELECT NVL(o.status, 'x'), TO_CHAR(o.order_date) FROM orders o",
+        "SELECT utl_x.status FROM orders utl_x",  # an alias, not a package
+        "WITH dbms_x AS (SELECT status FROM orders) SELECT dbms_x.status FROM dbms_x",
     ],
 )
 def test_oracle_guard_accepts_reads(sql):
     guard_sources(guard_readonly(sql, "oracle"), [("", "ORDERS"), *builtin_sources("oracle")])
+
+
+@pytest.mark.parametrize(
+    "dialect,sql",
+    [
+        ("mysql", "SELECT sys.format_bytes(1) FROM orders"),
+        ("tsql", "SELECT sys.fn_varbintohexstr(o.status) FROM orders o"),
+        ("postgres", "SELECT xdb.helper(1) FROM orders"),
+    ],
+)
+def test_oracle_owner_list_applies_to_oracle_only(dialect, sql):
+    """Review of #14: sys.* is a harmless helper schema on MySQL and SQL Server."""
+    guard_sources(guard_readonly(sql, dialect), [("", "orders")])
+    with pytest.raises(SqlGuardError, match="Calls into"):
+        guard_readonly(sql, "oracle")
+
+
+def _oracle_validator(seen: list[str]) -> Validator:
+    columns = [
+        {"id": f"c{i}", "table_id": f"t{t}", "schema_name": "", "table_name": tn, "name": cn, "data_type": "NUMBER"}
+        for i, (t, tn, cn) in enumerate(
+            [(1, "ORDERS", "ORDER_ID"), (1, "ORDERS", "CUSTOMER_ID"), (1, "ORDERS", "STATUS"), (2, "CUSTOMERS", "CUSTOMER_ID")]
+        )
+    ] + builtin_columns("oracle")
+
+    def run(sql: str) -> list[list]:
+        seen.append(sql)
+        return [[0, 0]]
+
+    return Validator(dialect="oracle", catalog_columns=columns, relationships=[], attributes=[], sql_attributes=[], run=run)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT o.customer_id, c.customer_id FROM orders o JOIN customers c ON c.customer_id = o.customer_id",
+        "SELECT o.*, c.* FROM orders o JOIN customers c ON c.customer_id = o.customer_id",
+        "SELECT order_id FROM orders UNION SELECT customer_id FROM customers ORDER BY 1",
+    ],
+)
+def test_oracle_dry_run_does_not_wrap_the_query(sql):
+    """Review of #14: SELECT * FROM (<query>) aoq raises ORA-00918 when two output columns share a name."""
+    seen: list[str] = []
+    _oracle_validator(seen).validate(sql)
+    assert seen, "no dry run"
+    dry = seen[-1]
+    assert "aoq" not in dry and dry.endswith("FETCH FIRST 0 ROWS ONLY")
+    assert limited(sqlglot.parse_one(sql, read="oracle"), 1, "oracle").sql(dialect="oracle").endswith("FETCH FIRST 1 ROWS ONLY")
+    assert "aoq" in limited(sqlglot.parse_one(sql), 1, "postgres").sql(dialect="postgres")  # other dialects as before
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT USER FROM dual",
+        "SELECT dummy FROM dual",
+        "SELECT SYSDATE, USER, UID FROM DUAL",
+        "SELECT * FROM orders WHERE ROWNUM <= 5",
+        "SELECT o.status, LEVEL FROM orders o",
+    ],
+)
+def test_dual_and_pseudo_columns_validate(sql):
+    """Review of #14: DUAL had no columns, so SELECT USER FROM dual came back valid=false."""
+    out = _oracle_validator([]).validate(sql)
+    assert out["valid"], out["errors"]
 
 
 def test_generated_probes_are_valid_oracle():
@@ -204,6 +278,7 @@ def test_oracle_is_read_only(ora_svc):
         "DELETE FROM orders",
         "SELECT dbms_xmlgen.getxml('select 1 from dual') FROM orders",
         "SELECT ao_test_seq.nextval FROM orders",
+        "SELECT utl_inaddr.get_host_name FROM dual",
         "SELECT httpuritype('http://example.com').getclob() FROM DUAL",
     ):
         with pytest.raises(OntologyError):

@@ -6,6 +6,7 @@ import sqlite3
 from dataclasses import replace
 
 import pytest
+import sqlalchemy as sa
 
 from auto_ontology_mcp.catalog import TableFilter
 from auto_ontology_mcp.config import Settings, _patterns
@@ -151,3 +152,89 @@ def test_re_adding_a_datasource_keeps_its_saved_filter(settings, demo_path):
     out = svc.add_datasource("demo", url, tables=["*"])  # the explicit way to read everything again
     assert "table_filter" not in out["scan"]
     assert {"orders", "customers", "regions"} <= names(svc)
+
+
+# ------------------------------------------------- review of #14, second round
+
+
+def test_a_table_the_scan_could_not_read_is_kept(svc, monkeypatch):
+    """A failed or timed-out reflection call must not delete the table and its reviewed mappings."""
+    svc.save_table_terms("customers", DEMO_TERMS["customers"])
+    ds = svc.ds()
+    mappings = len(svc.store.attributes_for_datasource(ds["id"]))
+    linked = {t["name"]: t["primary_table_id"] for t in svc.store.terms(ds["id"])}
+
+    real = sa.engine.reflection.Inspector.get_columns
+
+    def flaky(self, table_name, schema=None, **kw):
+        if table_name == "customers":
+            raise TimeoutError("DPY-4024: call timeout of 30000 ms exceeded")
+        return real(self, table_name, schema=schema, **kw)
+
+    monkeypatch.setattr(sa.engine.reflection.Inspector, "get_columns", flaky)
+    out = svc.scan_datasource()
+    assert any("customers" in w and "kept" in w for w in out["warnings"])
+    assert "customers" in names(svc)
+    assert len(svc.store.attributes_for_datasource(ds["id"])) == mappings
+    assert {t["name"]: t["primary_table_id"] for t in svc.store.terms(ds["id"])} == linked
+
+
+def test_a_schema_that_could_not_be_listed_keeps_its_tables(svc, monkeypatch):
+    before = names(svc)
+
+    def broken(self, schema=None, **kw):
+        raise TimeoutError("DPY-4024: call timeout exceeded")
+
+    monkeypatch.setattr(sa.engine.reflection.Inspector, "get_table_names", broken)
+    out = svc.scan_datasource()
+    assert any("Could not list tables" in w for w in out["warnings"])
+    assert names(svc) == before
+
+
+def test_dotted_pattern_matches_the_login_schema(settings, demo_path):
+    """The login user's own tables are stored with an empty schema; HR.EMP* must still match them."""
+    assert TableFilter.parse("HR.EMP*").matches("", "EMPLOYEES", default_schema="HR")
+    assert not TableFilter.parse("HR.EMP*").matches("", "EMPLOYEES", default_schema="SALES")
+    assert not TableFilter.parse("HR.EMP*").matches("", "EMPLOYEES")
+    svc = OntologyService(settings)
+    out = svc.add_datasource("demo", f"sqlite:///{demo_path}", tables=["main.orders"])  # SQLite's login schema is main
+    assert names(svc) == {"orders"}
+    assert not any("matched no table" in w for w in out["scan"]["warnings"])
+
+    svc.scan_datasource(tables=["main.customers"])  # a rescan must not see orders as dropped
+    assert names(svc) == {"orders", "customers"}
+
+
+def test_filtered_scan_probes_only_joins_touching_what_it_read(svc, monkeypatch):
+    from auto_ontology_mcp import inference
+
+    def pairs():
+        return {
+            (r["source"], r["target"]): (r["status"], r["confidence"])
+            for r in svc.list_relationships(status="all")["relationships"]
+        }
+
+    before = pairs()
+    cities = next(t["id"] for t in svc.store.tables(svc.ds()["id"]) if t["name"] == "cities")
+    probed = []
+    real = inference.probe_containment
+
+    def spy(cand, **kw):
+        probed.append((cand.source["table_id"], cand.target["table_id"]))
+        return real(cand, **kw)
+
+    monkeypatch.setattr(inference, "probe_containment", spy)
+    svc.scan_datasource(tables=["cities"])
+    assert len(probed) == 3  # cities.state_id, customers.delivery_city_id, customers.billing_city_id
+    assert all(cities in pair for pair in probed)
+    assert pairs() == before  # relationships elsewhere keep their evidence
+
+
+def test_blank_tables_argument_counts_as_not_given(settings, demo_path):
+    svc = OntologyService(settings)
+    svc.add_datasource("demo", f"sqlite:///{demo_path}", tables=["regions"])
+    out = svc.scan_datasource(tables=[" "])
+    assert out["table_filter_source"] == "datasource"
+    svc.add_datasource("demo", f"sqlite:///{demo_path}", tables=[" ", ""])
+    assert svc.ds()["table_filter"] == ["regions"]
+    assert _patterns(" , ") == () and TableFilter.parse([" "]) is None
