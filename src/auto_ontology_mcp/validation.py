@@ -3,7 +3,8 @@
 Ports the deterministic checks of Auto Ontology's text-to-SQL repair path
 (``retrieval/text_to_sql/db_probe``, Apache-2.0, NVIDIA): near-miss string
 literals, percent-vs-fraction thresholds, joins that the semantic model does
-not know, plus a fan-out check for aggregates over a one-to-many join.
+not know, plus a fan-out check for aggregates over a one-to-many join. The checks
+that need only the parsed query are in ``structure.py``.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from typing import Any, Callable
 import sqlglot
 from sqlglot import exp
 
+from . import structure
 from .naming import compact
 from .sqlcheck import Analysis, PhysicalColumn, SqlGuardError, analyze, guard_readonly, guard_sources
 
@@ -129,6 +131,20 @@ class Validator:
         except SqlGuardError as exc:
             return {"valid": False, "errors": [str(exc)], "warnings": [], "notes": [], "grounding": {}}
 
+        # Unquoted mixed-case names fail to resolve once the dialect folds them. Report the quoted
+        # spelling and keep checking the corrected query, so its other problems surface in the same call.
+        fixed, quoted = structure.quote_mixed_case(tree, self.dialect, self.catalog_columns)
+        if quoted:
+            errors.append(
+                f"Unquoted names are folded to lowercase in this dialect, so they no longer match the stored "
+                f"spelling: {', '.join(quoted[:12])}. Write them in double quotes with the exact case. Corrected "
+                f"query: {fixed.sql(dialect=self.dialect)}"
+            )
+            tree = fixed
+        placeholder = structure.degenerate(tree)
+        if placeholder:
+            errors.append(placeholder)
+
         analysis = analyze(tree, self.catalog_columns, self.dialect)
         if analysis.error:
             errors.append(self._explain_qualify_error(analysis.error))
@@ -143,6 +159,12 @@ class Validator:
         self._check_fanout(analysis, fanned, warnings)
         self._check_branch_fanout(analysis, fanned, warnings)
         self._check_list_columns(analysis, warnings)
+        if analysis.qualified:
+            warnings += structure.integer_divisions(analysis.tree, self.dialect, self._col)
+            warnings += structure.vacuous_group_by(analysis.tree, self.dialect, self._col)
+            warnings += structure.missing_aggregation(
+                analysis.tree, self.dialect, {(one[1].casefold(), many[1].casefold()) for one, many in fanned}
+            )
         if probe:
             self._check_string_literals(analysis, warnings)
         if probe or scale:

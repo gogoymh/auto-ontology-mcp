@@ -20,6 +20,10 @@ The following parts are adapted from Auto Ontology source files:
   semantic/sql_attribute_suggester.py.
 - Literal and join probes (src/auto_ontology_mcp/validation.py), following
   retrieval/text_to_sql/db_probe/literal_check.py and join_path_check.py.
+- Checks on the parsed query (src/auto_ontology_mcp/structure.py): integer division, from
+  retrieval/text_to_sql/db_probe/literal_check.py; placeholder queries, a GROUP BY on a
+  primary key, a many-side column selected next to an aggregate and unquoted mixed-case
+  identifiers, from retrieval/text_to_sql/agents/sql_parse_validation.py.
 
 Changes: the LLM, embedding and reranking calls were removed. The MCP client's
 model performs those steps through the tools, and the server keeps the

@@ -404,3 +404,86 @@ def test_chatgpt_search_and_fetch(modeled):
     assert results and results[0]["id"].startswith("term:")
     doc = modeled.fetch_document(results[0]["id"])
     assert doc["text"].startswith("# Customer")
+
+
+@pytest.mark.parametrize(
+    "sql, warned",
+    [
+        ("SELECT SUM(quantity) / COUNT(*) FROM order_lines", True),
+        ("SELECT COUNT(CASE WHEN quantity > 2 THEN 1 END) * 100 / COUNT(*) FROM order_lines", True),
+        ("SELECT CAST(SUM(quantity) AS REAL) / COUNT(*) FROM order_lines", False),
+        ("SELECT 100.0 * SUM(quantity) / COUNT(*) FROM order_lines", False),
+        ("SELECT SUM(line_total) / COUNT(*) FROM order_lines", False),  # line_total is REAL
+        ("SELECT AVG(quantity) / 2 FROM order_lines", False),
+    ],
+)
+def test_integer_division_is_flagged(modeled, sql, warned):
+    out = modeled.validate_sql(sql)
+    assert any("Integer division" in w for w in out["warnings"]) is warned, out["warnings"]
+
+
+def test_integer_division_is_not_flagged_where_division_is_fractional():
+    from auto_ontology_mcp import structure
+    import sqlglot
+
+    tree = sqlglot.parse_one("SELECT COUNT(*) / 2 FROM t", read="mysql")
+    assert structure.integer_divisions(tree, "mysql", lambda p: None) == []
+    assert structure.integer_divisions(sqlglot.parse_one("SELECT COUNT(*) / 2 FROM t", read="postgres"), "postgres", lambda p: None)
+
+
+def test_placeholder_queries_are_refused(modeled):
+    assert any("never true" in e for e in modeled.validate_sql("SELECT order_id FROM orders WHERE 1 = 0")["errors"])
+    assert any("constant NULL" in e for e in modeled.validate_sql("SELECT NULL AS revenue FROM orders")["errors"])
+    assert modeled.validate_sql("SELECT order_id FROM orders WHERE 1 = 1 AND status = 'delivered'")["valid"]
+
+
+def test_group_by_a_unique_column_of_the_only_table_is_flagged(modeled):
+    out = modeled.validate_sql("SELECT order_id, COUNT(*) FROM orders GROUP BY order_id")
+    assert any("every group is a single row" in w for w in out["warnings"])
+    # Joined to its order lines, grouping by the order is the point.
+    joined = modeled.validate_sql(
+        "SELECT o.order_id, SUM(ol.line_total) FROM orders o JOIN order_lines ol ON ol.order_id = o.order_id GROUP BY o.order_id"
+    )
+    assert not any("every group is a single row" in w for w in joined["warnings"])
+    assert not any("single row" in w for w in modeled.validate_sql("SELECT status, COUNT(*) FROM orders GROUP BY status")["warnings"])
+
+
+def test_a_many_side_column_next_to_a_group_by_is_flagged(modeled):
+    bare = modeled.validate_sql(
+        "SELECT o.order_id, ol.quantity, COUNT(*) FROM orders o JOIN order_lines ol ON ol.order_id = o.order_id GROUP BY o.order_id"
+    )
+    assert any("order_lines.quantity is selected without an aggregate" in w for w in bare["warnings"]), bare["warnings"]
+    fine = modeled.validate_sql(
+        "SELECT o.order_id, o.status, MAX(ol.quantity) FROM orders o JOIN order_lines ol ON ol.order_id = o.order_id GROUP BY o.order_id"
+    )
+    assert not any("without an aggregate" in w for w in fine["warnings"])
+    grouped = modeled.validate_sql(
+        "SELECT o.order_id, ol.quantity, COUNT(*) FROM orders o JOIN order_lines ol ON ol.order_id = o.order_id GROUP BY o.order_id, ol.quantity"
+    )
+    assert not any("without an aggregate" in w for w in grouped["warnings"])
+
+
+def test_mixed_case_names_are_quoted_for_folding_dialects():
+    from auto_ontology_mcp import structure
+    from auto_ontology_mcp.validation import Validator
+    import sqlglot
+
+    columns = [
+        {"id": "c1", "table_id": "t1", "schema_name": "", "table_name": "Orders", "name": "OrderDate", "data_type": "date"},
+        {"id": "c2", "table_id": "t1", "schema_name": "", "table_name": "Orders", "name": "total", "data_type": "integer"},
+    ]
+    sql = "SELECT o.OrderDate, total AS Amount FROM Orders o WHERE Orders.total > 1 ORDER BY Amount"
+    fixed, quoted = structure.quote_mixed_case(sqlglot.parse_one(sql, read="postgres"), "postgres", columns)
+    assert quoted == ["Orders", "OrderDate"]
+    assert fixed.sql(dialect="postgres") == 'SELECT o."OrderDate", total AS Amount FROM "Orders" AS o WHERE "Orders".total > 1 ORDER BY Amount'
+    # Already quoted, or a dialect that does not fold: nothing to do.
+    assert structure.quote_mixed_case(sqlglot.parse_one('SELECT "OrderDate" FROM "Orders"', read="postgres"), "postgres", columns)[1] == []
+    assert structure.quote_mixed_case(sqlglot.parse_one(sql, read="sqlite"), "sqlite", columns)[1] == []
+
+    validator = Validator(dialect="postgres", catalog_columns=columns, relationships=[], attributes=[], sql_attributes=[], run=lambda q: [])
+    out = validator.validate("SELECT OrderDate FROM Orders", probe=False)
+    assert not out["valid"] and 'SELECT "OrderDate" FROM "Orders"' in out["errors"][0]
+    assert len(out["errors"]) == 1  # the corrected query is what the remaining checks see
+    # A correctly quoted query resolves, and its columns are traced to the catalog.
+    quoted_ok = validator.validate('SELECT "OrderDate" FROM "Orders" WHERE total / 2 > 1', probe=False)
+    assert quoted_ok["valid"] and any("Integer division" in w for w in quoted_ok["warnings"])
