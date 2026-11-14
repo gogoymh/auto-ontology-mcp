@@ -97,8 +97,20 @@ _FORBIDDEN_FUNCTIONS = frozenset(
         "read_text",
         "read_blob",
         "glob",
+        # Oracle: URI types fetch URLs or rows by path, BFILENAME reads server files.
+        "httpuritype",
+        "dburitype",
+        "xdburitype",
+        "uritype",
+        "bfilename",
     }
 )
+
+# Oracle owners whose members must not be called by qualified name (sys.dbms_*, ctxsys.*). Oracle
+# only: on MySQL and SQL Server, sys.* holds harmless helpers and a user schema may be called sys.
+_FORBIDDEN_QUALIFIERS = frozenset({"sys", "ctxsys", "ordsys", "mdsys", "xdb", "wmsys", "lbacsys", "dvsys", "olapsys"})
+# Pseudo-columns that advance or read a sequence (seq.NEXTVAL changes state).
+_SEQUENCE_PSEUDOCOLUMNS = frozenset({"nextval", "currval"})
 
 
 # Name prefixes / suffixes of functions that touch files, other servers or server state.
@@ -120,6 +132,76 @@ def _forbidden_function(name: str) -> bool:
         or n.startswith(_FORBIDDEN_PREFIXES)
         or n.endswith(_FORBIDDEN_SUFFIXES)
     )
+
+
+def _qualifier_segments(func: exp.Expression) -> list[str]:
+    """Owner / package names in front of a call such as ``sys.dbms_xmlgen.getxml(...)``.
+
+    sqlglot builds either ``Dot(qualifier, call)`` or a ``Column`` whose parts
+    end in the call, so the dotted text in front of the call is read off the
+    outermost such ancestor.
+    """
+    top = func
+    while isinstance(top.parent, (exp.Dot, exp.Column)):
+        top = top.parent
+    if top is func:
+        return []
+    head = top.sql().split("(", 1)[0]
+    parts = [p.strip().strip('"`[]').lower() for p in head.split(".")]
+    return [p for p in parts[:-1] if p]
+
+
+_ORACLE_PACKAGE_PREFIXES = ("dbms_", "utl_")
+
+
+def _forbidden_qualifier(part: str, dialect: str | None) -> bool:
+    return dialect == "oracle" and part in _FORBIDDEN_QUALIFIERS
+
+
+def _oracle_package_name(name: str) -> bool:
+    return name in _FORBIDDEN_QUALIFIERS or name.startswith(_ORACLE_PACKAGE_PREFIXES)
+
+
+def _package_alias(tree: exp.Expression) -> str | None:
+    """A table alias, subquery alias or CTE name spelled like an Oracle package or system owner.
+
+    Such a name is refused outright. Exempting columns qualified by it would have to follow
+    Oracle's scoping exactly: an alias inside a subquery is not visible outside it, so
+    ``SELECT utl_inaddr.get_host_name FROM dual WHERE EXISTS (SELECT 1 FROM dual utl_inaddr)``
+    still calls the package.
+    """
+    for node in tree.find_all(exp.TableAlias, exp.CTE):
+        name = (node.alias_or_name if isinstance(node, exp.CTE) else node.name).casefold()
+        if _oracle_package_name(name):
+            return name
+    return None
+
+
+def _table_names(tree: exp.Expression) -> set[str]:
+    """Names of the tables the query reads; guard_sources checks them against the catalog."""
+    return {table.name.casefold() for table in tree.find_all(exp.Table)}
+
+
+def _package_column(column: exp.Column, tables: set[str]) -> str | None:
+    """Oracle calls a zero-argument package function without parentheses (``utl_inaddr.get_host_name``),
+    which parses as a qualified column. Returns the offending qualifier, if any.
+
+    A qualifier that is a table the query reads is a real column (a catalog table may be called
+    ``UTL_LOG``); a table of that name in the user's schema also hides the package from Oracle.
+    """
+    for part in column.parts[:-1]:
+        name = part.name.casefold()
+        if name not in tables and _oracle_package_name(name):
+            return name
+    return None
+
+
+def _is_sequence_reference(node: exp.Expression) -> bool:
+    if isinstance(node, exp.Column):
+        return bool(node.table) and node.name.lower() in _SEQUENCE_PSEUDOCOLUMNS
+    if isinstance(node, exp.Dot):
+        return node.name.lower() in _SEQUENCE_PSEUDOCOLUMNS
+    return False
 
 
 def guard_sources(tree: exp.Expression, catalog_tables: Iterable[tuple[str, str]]) -> None:
@@ -170,6 +252,13 @@ def guard_readonly(sql: str, dialect: str | None) -> exp.Expression:
         raise SqlGuardError(
             f"Only SELECT queries are allowed (got {type(tree).__name__.upper()})."
         )
+    tables: set[str] = set()
+    if dialect == "oracle":
+        if alias := _package_alias(tree):
+            raise SqlGuardError(
+                f"The alias {alias} is spelled like an Oracle package or system owner. Use another alias."
+            )
+        tables = _table_names(tree)
     for node in tree.walk():
         if isinstance(node, _FORBIDDEN_NODES):
             raise SqlGuardError(f"{type(node).__name__.upper()} is not allowed in a read-only query.")
@@ -179,6 +268,13 @@ def guard_readonly(sql: str, dialect: str | None) -> exp.Expression:
             name = (node.sql_name() if not isinstance(node, exp.Anonymous) else str(node.this)).lower()
             if _forbidden_function(name):
                 raise SqlGuardError(f"Function {name}() is not allowed.")
+            for part in [*_qualifier_segments(node), *name.split(".")[:-1]]:
+                if _forbidden_qualifier(part, dialect) or _forbidden_function(part):
+                    raise SqlGuardError(f"Calls into {part}.* are not allowed.")
+        if dialect == "oracle" and isinstance(node, exp.Column) and (part := _package_column(node, tables)):
+            raise SqlGuardError(f"Calls into {part}.* are not allowed.")
+        if dialect == "oracle" and _is_sequence_reference(node):  # elsewhere t.nextval is just a column
+            raise SqlGuardError("Sequence NEXTVAL/CURRVAL is not allowed in a read-only query.")
         if isinstance(node, exp.Lock) or (isinstance(node, exp.Select) and node.args.get("locks")):
             raise SqlGuardError("Row locking clauses (FOR UPDATE/SHARE) are not allowed.")
     return tree
@@ -294,6 +390,23 @@ def _column_side(node: exp.Expression) -> exp.Column | None:
     return node if isinstance(node, exp.Column) else None
 
 
+# Oracle pseudo-columns and niladic functions written without parentheses (SELECT USER FROM DUAL).
+# sqlglot parses them as columns, which then fail to resolve against the catalog.
+_ORACLE_PSEUDOCOLUMNS = frozenset(
+    {"user", "uid", "rownum", "rowid", "level", "ora_rowscn", "systimestamp", "localtimestamp", "sessiontimezone", "dbtimezone"}
+)
+
+
+def _mark_oracle_pseudocolumns(tree: exp.Expression, columns: list[dict[str, Any]]) -> exp.Expression:
+    """Turn unqualified Oracle pseudo-columns into plain variables, unless a catalog column has that name."""
+    real = {c["name"].casefold() for c in columns}
+    for col in list(tree.find_all(exp.Column)):
+        name = col.name.casefold()
+        if not col.table and name in _ORACLE_PSEUDOCOLUMNS and name not in real:
+            col.replace(exp.Var(this=col.name))
+    return tree
+
+
 def analyze(sql_or_tree: str | exp.Expression, columns: list[dict[str, Any]], dialect: str | None) -> Analysis:
     """Qualify the query against the catalog and collect what validation needs."""
     tree = sqlglot.parse_one(sql_or_tree, read=dialect) if isinstance(sql_or_tree, str) else sql_or_tree
@@ -311,9 +424,12 @@ def analyze(sql_or_tree: str | exp.Expression, columns: list[dict[str, Any]], di
         # then a correctly quoted "OrderDate" no longer resolves. For those dialects the catalog
         # keeps its exact spelling, as the database does.
         exact = (dialect or "").lower() in ("postgres", "redshift")
+        working = tree.copy()
+        if dialect == "oracle":
+            working = _mark_oracle_pseudocolumns(working, columns)
         qualified = qualify(
-            tree.copy(),
-            schema=MappingSchema(mapping, dialect=dialect, normalize=not exact),
+            working,
+            schema=MappingSchema(mapping, dialect=dialect, normalize=not exact),  
             dialect=dialect,
             db=default_db,
             validate_qualify_columns=True,

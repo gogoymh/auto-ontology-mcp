@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterable
 
 
 def _bool(name: str, default: bool) -> bool:
@@ -23,6 +24,22 @@ def _int(name: str, default: int) -> int:
 
 
 TOOLSETS = ("answer", "model", "knowledge", "share")
+
+
+def split_patterns(value: str | Iterable[str] | None) -> list[str]:
+    """Table filter patterns from a comma-separated string or a list, stripped, blanks dropped.
+
+    Every entry point (env, CLI, MCP arguments, the saved filter) splits with this, so blank
+    input means "not given" everywhere.
+    """
+    if value is None:
+        return []
+    items = value.split(",") if isinstance(value, str) else [part for v in value for part in str(v or "").split(",")]
+    return [p.strip() for p in items if p.strip()]
+
+
+def _patterns(raw: str | None) -> tuple[str, ...]:
+    return tuple(split_patterns(raw))
 
 
 def _toolsets(raw: str | None) -> frozenset[str]:
@@ -64,6 +81,16 @@ class Settings:
     vault: Path | None = None
     """Obsidian vault for originals (AUTO_ONTOLOGY_VAULT). Unset: the knowledge export folder is the vault."""
 
+    oracle_client_lib: str | None = None
+    """Oracle thick mode (AUTO_ONTOLOGY_ORACLE_CLIENT_LIB): an Instant Client directory, or 1 to use the
+    client found on the library path, for servers that enforce native network encryption. Unset: python-oracledb
+    thin mode (no client install). Both modes need Oracle 12.1+."""
+
+    scan_tables: tuple[str, ...] = ()
+    """Default table filter for scans (AUTO_ONTOLOGY_SCAN_TABLES, comma-separated globs such as
+    ``SALES_*,HR.EMP*,!*_LOG``). Empty: every table. A datasource's own filter or the scan's
+    ``tables`` argument takes precedence."""
+
     toolsets: frozenset[str] = frozenset({"answer", "model", "knowledge", "share"})
     """Tool groups to expose (AUTO_ONTOLOGY_TOOLSETS, comma-separated; default all). A client that only
     asks questions of modeled databases needs 'answer'; fewer tools leave the model more context."""
@@ -84,4 +111,6 @@ class Settings:
             port=_int("AUTO_ONTOLOGY_MCP_PORT", 8765),
             vault=Path(os.environ["AUTO_ONTOLOGY_VAULT"]).expanduser() if os.environ.get("AUTO_ONTOLOGY_VAULT") else None,
             toolsets=_toolsets(os.environ.get("AUTO_ONTOLOGY_TOOLSETS")),
+            oracle_client_lib=os.environ.get("AUTO_ONTOLOGY_ORACLE_CLIENT_LIB") or None,
+            scan_tables=_patterns(os.environ.get("AUTO_ONTOLOGY_SCAN_TABLES")),
         )

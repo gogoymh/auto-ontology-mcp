@@ -16,6 +16,12 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from .config import split_patterns
+
+
+TABLES_HELP = (
+    "comma-separated table globs, e.g. 'SALES_*,HR.EMP*,!*_LOG' (default: AUTO_ONTOLOGY_SCAN_TABLES, else all tables)"
+)
 
 
 def _settings():
@@ -123,11 +129,16 @@ def cmd_demo(args: argparse.Namespace) -> None:
 def cmd_add(args: argparse.Namespace) -> None:
     svc = _service()
     schemas = [s.strip() for s in args.schemas.split(",")] if args.schemas else None
-    _print(svc.add_datasource(args.name, args.url, args.description, schemas, scan=not args.no_scan))
+    tables = _split(args.tables)
+    _print(svc.add_datasource(args.name, args.url, args.description, schemas, scan=not args.no_scan, tables=tables))
 
 
 def cmd_scan(args: argparse.Namespace) -> None:
-    _print(_service().scan_datasource(args.name, profile=not args.no_profile))
+    _print(_service().scan_datasource(args.name, profile=not args.no_profile, tables=_split(args.tables)))
+
+
+def _split(raw: str | None) -> list[str] | None:
+    return split_patterns(raw) or None
 
 
 def cmd_list(_: argparse.Namespace) -> None:
@@ -211,12 +222,14 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("url", help="SQLAlchemy URL")
     p.add_argument("--description", default=None)
     p.add_argument("--schemas", default=None, help="comma-separated schemas to include")
+    p.add_argument("--tables", default=None, help=TABLES_HELP + " (saved with the datasource)")
     p.add_argument("--no-scan", action="store_true")
     p.set_defaults(func=cmd_add)
 
     p = sub.add_parser("scan", help="re-scan a datasource")
     p.add_argument("name")
     p.add_argument("--no-profile", action="store_true")
+    p.add_argument("--tables", default=None, help=TABLES_HELP + " (this scan only)")
     p.set_defaults(func=cmd_scan)
 
     p = sub.add_parser("list", help="show datasources and readiness")

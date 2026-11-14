@@ -373,10 +373,36 @@ You can also give the model a URL and let it call `add_datasource`. Any SQLAlche
 | PostgreSQL | `postgresql+psycopg://user:pass@host:5432/db` | `psycopg[binary]` |
 | MySQL / MariaDB | `mysql+pymysql://user:pass@host:3306/db` | `pymysql` |
 | DuckDB | `duckdb:////absolute/path/file.duckdb` | `duckdb-engine` |
+| Oracle | `oracle+oracledb://user:pass@host:1521/?service_name=ORCLPDB1` | `oracledb` |
 
-From a clone, `uv sync --extra postgres` (or `mysql`, `duckdb`, `all`) installs the same drivers.
+From a clone, `uv sync --extra postgres` (or `mysql`, `duckdb`, `oracle`, `all`) installs the same drivers.
 
-The test suite runs against SQLite and PostgreSQL 17. MySQL and DuckDB go through the same SQLAlchemy and sqlglot code paths but have not been tested against a live server yet.
+The test suite runs against SQLite and PostgreSQL 17, and against Oracle when `AO_TEST_ORACLE_URL` is set. MySQL and DuckDB go through the same SQLAlchemy and sqlglot code paths but have not been tested against a live server yet.
+
+### Large schemas
+
+By default a scan reads every table and view. A schema with thousands of tables takes hours to scan and profile, so give the scan a table filter:
+
+```bash
+export AUTO_ONTOLOGY_SCAN_TABLES="STJ_KTP_*,ACB_*,!*_H"      # default filter for every scan
+auto-ontology-mcp add vit "oracle+oracledb://..." --tables "STJ_KTP_*"   # saved with the datasource
+auto-ontology-mcp scan vit --tables "ADR_*"                      # this scan only
+```
+
+The same patterns work as `tables=[...]` on the `add_datasource` and `scan_datasource` tools.
+- **Syntax.** Patterns are case-insensitive globs: `*` and `?`, with `%` working like `*`. `_` is literal. A pattern with a dot matches `schema.table` (`HR.EMP*`). `!pattern` excludes, and exclusions alone mean "everything except".
+- **Precedence.** The `tables` argument of the call wins, then the datasource's saved filter, then `AUTO_ONTOLOGY_SCAN_TABLES`, then all tables. `*` reads everything.
+- **Growing the catalog.** Tables scanned earlier that fall outside the filter are kept, with their Terms and relationships, so you can grow the catalog area by area. A scan removes a table only when the filter covers it and the database no longer has it.
+- **What each scan touches.** Only the tables a scan reads are profiled. Join inference runs across the whole catalog.
+- **Knowledge store.** The built-in `knowledge` store is never filtered.
+
+**Oracle notes.**
+- Oracle Database 12.1 or later is required. Row limits are written as `FETCH FIRST n ROWS ONLY`, which 11g does not understand, so 11g is not supported in either driver mode.
+- `python-oracledb` runs in thin mode by default, which needs no Oracle client.
+- For servers that enforce native network encryption, install Oracle Instant Client and set `AUTO_ONTOLOGY_ORACLE_CLIENT_LIB` to its directory (or to `1` if it is on the library path). This switches the driver to thick mode.
+- A scan covers the login user's schema. Pass `--schemas HR,SALES` (or `schemas=[...]`) to scan other owners'.
+- Application schemas often hold thousands of tables. Scan only the areas you model with a table filter (see [Large schemas](#large-schemas)).
+- The catalog keeps Oracle's own spelling (`CUSTOMERS`, `CUSTOMER_ID`), so unquoted lowercase SQL works as it does in SQL*Plus.
 
 ## Personal knowledge base
 
@@ -590,8 +616,12 @@ Not carried over from Auto Ontology: the web UI and REST API, users, groups and 
 
 The server writes in exactly one place: `~/.auto-ontology-mcp/knowledge.sqlite`, through the knowledge tools, which build parameterized statements from validated input. `run_sql` cannot write there either. Connected databases are only ever read, enforced in three layers:
 
-1. **SQL guard.** One `SELECT`, `WITH` or set operation per call. DML, DDL, `PRAGMA`, `ATTACH`, `SELECT … INTO`, `FOR UPDATE` and functions that reach files, other servers or server state (`pg_read_file`, `dblink`, `LOAD_FILE`, `set_config`, `load_extension`, ...) are refused. Row sources are allow-listed against the scanned catalog, which also blocks `sqlite_master`, DuckDB's `FROM '/path/to/file'` and `OPENQUERY`.
-2. **Read-only connections.** SQLite opens with `mode=ro`, PostgreSQL with `default_transaction_read_only`, DuckDB with `read_only`, MySQL with a read-only session.
+1. **SQL guard.** One `SELECT`, `WITH` or set operation per call. DML, DDL, `PRAGMA`, `ATTACH`, `SELECT … INTO`, `FOR UPDATE` and functions that reach files, other servers or server state (`pg_read_file`, `dblink`, `LOAD_FILE`, `set_config`, `load_extension`, ...) are refused. Row sources are allow-listed against the scanned catalog, which also blocks `sqlite_master`, DuckDB's `FROM '/path/to/file'` and `OPENQUERY`. Oracle's one-row `DUAL` is the only extra source allowed. On Oracle the guard also refuses:
+   - calls into `DBMS_*`/`UTL_*` packages and system owners (`SYS`, `CTXSYS`, `XDB`, ...), even when qualified (`sys.dbms_xmlgen.getxml(...)`) or written without parentheses (`utl_inaddr.get_host_name`);
+   - table aliases and CTE names spelled like those packages or owners (`FROM orders utl_x`), because such an alias could hide a package call;
+   - the URI types (`HTTPURITYPE`, ...) and `BFILENAME`;
+   - sequence `NEXTVAL`/`CURRVAL`.
+2. **Read-only connections.** SQLite opens with `mode=ro`, PostgreSQL with `default_transaction_read_only`, DuckDB with `read_only`, MySQL with a read-only session, and Oracle runs `SET TRANSACTION READ ONLY` at the start of every transaction. A PL/SQL function declared `PRAGMA AUTONOMOUS_TRANSACTION` can still write outside that transaction, so on Oracle a read-only account matters even more.
 3. **Rollback.** Every transaction is rolled back.
 
 Queries time out after 30 seconds and return at most 500 rows (100 by default).
@@ -613,6 +643,8 @@ Over HTTP, a token is required to reach the server from anywhere but localhost: 
 | `AUTO_ONTOLOGY_VAULT` | unset | Your Obsidian vault. Originals and generated pages go to its `auto-ontology/` folder, and `original` paths are relative to it. Unset: `$AUTO_ONTOLOGY_HOME/wiki/knowledge` is the vault |
 | `AUTO_ONTOLOGY_MAX_ROWS` | `500` | Upper bound on rows `run_sql` returns |
 | `AUTO_ONTOLOGY_QUERY_TIMEOUT_S` | `30` | Per-query timeout in seconds |
+| `AUTO_ONTOLOGY_SCAN_TABLES` | unset | Default table filter for scans, comma-separated globs (`SALES_*,HR.EMP*,!*_LOG`). Unset: every table. See [Large schemas](#large-schemas) |
+| `AUTO_ONTOLOGY_ORACLE_CLIENT_LIB` | unset | Oracle thick mode (for native network encryption): Instant Client directory, or `1` for the client on the library path. Unset: thin mode. Both need Oracle 12.1+ |
 | `AUTO_ONTOLOGY_PROFILE_ROWS` | `1000` | Rows sampled per table while profiling |
 | `AUTO_ONTOLOGY_ALLOW_DATASOURCE_TOOLS` | `1` | `0` hides `add_datasource` and `scan_datasource` from MCP |
 | `AUTO_ONTOLOGY_TOOLSETS` | `all` | Tool groups to expose, comma-separated: `answer` (always on), `model`, `knowledge`, `share` |
@@ -654,6 +686,13 @@ The PostgreSQL tests run when `AO_TEST_PG_URL` points at a disposable database:
 ```bash
 docker run -d --rm --name aomcp-pg -e POSTGRES_PASSWORD=pw -p 55432:5432 postgres:17
 AO_TEST_PG_URL=postgresql+psycopg://postgres:pw@127.0.0.1:55432/postgres uv run --extra postgres pytest
+```
+
+The Oracle tests run when `AO_TEST_ORACLE_URL` points at a disposable user. The test drops and recreates the demo tables in that user's schema:
+
+```bash
+docker run -d --rm --name aomcp-ora -e ORACLE_PASSWORD=pw -e APP_USER=ao -e APP_USER_PASSWORD=pw -p 1521:1521 gvenzl/oracle-free
+AO_TEST_ORACLE_URL="oracle+oracledb://ao:pw@127.0.0.1:1521/?service_name=FREEPDB1" uv run --extra oracle pytest tests/test_oracle.py
 ```
 
 | Module | Responsibility |

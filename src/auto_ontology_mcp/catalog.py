@@ -7,14 +7,25 @@ deterministic half of relationship resolution. Nothing here calls a model.
 
 from __future__ import annotations
 
+import fnmatch
 import logging
 from collections import defaultdict
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Iterable
 
 import sqlalchemy as sa
 
 from . import inference
-from .datasources import Connections, qualified_name, quote_ident, short_error, sqlglot_dialect
+from .config import split_patterns
+from .datasources import (
+    Connections,
+    native_name,
+    qualified_name,
+    quote_ident,
+    scans_default_schema_only,
+    short_error,
+    sqlglot_dialect,
+)
 from .profiling import LOW_CARDINALITY_MAX, profile_rows
 from .sqlcheck import transpile
 from .store import Store, new_id, now
@@ -28,7 +39,7 @@ _SYSTEM_SCHEMAS = {
 
 
 def _default_schemas(inspector: sa.Inspector, backend: str) -> list[str | None]:
-    if backend in ("sqlite", "mysql", "mariadb"):
+    if scans_default_schema_only(backend):
         return [None]
     try:
         names = inspector.get_schema_names()
@@ -42,6 +53,56 @@ def _default_schemas(inspector: sa.Inspector, backend: str) -> list[str | None]:
 
 
 SQLITE_SHADOW_SUFFIXES = ("_data", "_idx", "_content", "_docsize", "_config")
+
+
+@dataclass(frozen=True)
+class TableFilter:
+    """Which tables and views a scan reads.
+
+    Patterns are case-insensitive globs (``*``, ``?``; ``%`` works like ``*``;
+    ``_`` is a literal character). A pattern with a dot matches
+    ``schema.table``, otherwise the table name; tables in the login user's
+    own schema (stored with an empty schema) match under that schema's name.
+    ``!pattern`` excludes. With only exclusions, everything else is included.
+    """
+
+    include: tuple[str, ...]
+    exclude: tuple[str, ...]
+    given: tuple[str, ...] = ()
+
+    @classmethod
+    def parse(cls, patterns: str | Iterable[str] | None) -> "TableFilter | None":
+        include: list[str] = []
+        exclude: list[str] = []
+        given: list[str] = []
+        for item in split_patterns(patterns):
+            negate = item.startswith("!")
+            item = item[1:].strip() if negate else item
+            if not item:
+                continue
+            given.append(f"!{item}" if negate else item)
+            pattern = item.replace("%", "*").casefold()
+            (exclude if negate else include).append(pattern)
+        if not exclude and (not include or "*" in include):
+            return None  # nothing given, or everything asked for
+        return cls(tuple(include), tuple(exclude), tuple(given))
+
+    @property
+    def patterns(self) -> list[str]:
+        """The patterns as written, for reports."""
+        return list(self.given)
+
+    @staticmethod
+    def _hit(pattern: str, schema: str, table: str) -> bool:
+        target = f"{schema}.{table}" if "." in pattern else table
+        return fnmatch.fnmatchcase(target, pattern)
+
+    def matches(self, schema: str | None, table: str, default_schema: str | None = None) -> bool:
+        """*default_schema* is the login user's schema, used when *schema* is empty."""
+        s, t = (schema or default_schema or "").casefold(), table.casefold()
+        if self.include and not any(self._hit(p, s, t) for p in self.include):
+            return False
+        return not any(self._hit(p, s, t) for p in self.exclude)
 
 
 class Scanner:
@@ -67,15 +128,36 @@ class Scanner:
         schemas: list[str] | None = None,
         profile: bool = True,
         infer: bool = True,
+        tables: TableFilter | None = None,
     ) -> dict[str, Any]:
+        """Read the schema. With *tables*, only matching tables and views are read; tables
+        scanned earlier that fall outside the filter stay in the catalog untouched."""
         engine = self.connections.engine(ds)
         backend = engine.dialect.name
+        dialect = engine.dialect
+
+        def native(name: Any) -> Any:
+            return native_name(dialect, name)
+
+        def native_cols(names: list[Any] | None) -> list[Any]:
+            return [native(n) for n in names or []]
+
         inspector = sa.inspect(engine)
         wanted = schemas or ds.get("schemas") or None
         schema_list: list[str | None] = list(wanted) if wanted else _default_schemas(inspector, backend)
         warnings: list[str] = []
+        try:
+            login_schema = native(inspector.default_schema_name) or ""
+        except Exception:  # noqa: BLE001
+            login_schema = ""
+        # Tables the scan could not read, and schemas it could not list: their catalog rows are
+        # kept, not deleted as gone from the database (one timed-out reflection call must not
+        # drop reviewed work).
+        unread: set[tuple[str, str]] = set()
+        unlisted: set[str] = set()
 
         extracted: list[dict[str, Any]] = []
+        skipped = 0
         shadow: set[str] = set()
         if backend == "sqlite":
             # FTS5 and other virtual tables keep their data in shadow tables (x_data, x_idx, ...); skip those.
@@ -93,37 +175,65 @@ class Scanner:
                 names += [(n, "view") for n in inspector.get_view_names(schema=schema)]
             except Exception as exc:  # noqa: BLE001
                 warnings.append(f"Could not list tables in schema {schema!r}: {short_error(exc)}")
+                unlisted.add(native(schema) or "")
                 continue
             for name, kind in names:
                 if backend == "sqlite" and (name.startswith("sqlite_") or name in shadow):
+                    continue
+                if tables is not None and not tables.matches(native(schema), native(name), login_schema):
+                    skipped += 1
                     continue
                 try:
                     cols = inspector.get_columns(name, schema=schema)
                     pk = (inspector.get_pk_constraint(name, schema=schema) or {}).get("constrained_columns") or []
                     fks = inspector.get_foreign_keys(name, schema=schema) if kind == "table" else []
                 except Exception as exc:  # noqa: BLE001
-                    warnings.append(f"Could not read {schema or ''}.{name}: {short_error(exc)}")
+                    warnings.append(f"Could not read {schema or ''}.{name}: {short_error(exc)}; its catalog entry is kept")
+                    unread.add((native(schema) or "", native(name)))
                     continue
                 try:
                     comment = (inspector.get_table_comment(name, schema=schema) or {}).get("text")
                 except Exception:
                     comment = None
+                # Store names as the database spells them (Oracle: CUSTOMERS, not customers).
+                cols = [{**c, "name": native(c["name"])} for c in cols]
+                fks = [
+                    {
+                        **fk,
+                        "constrained_columns": native_cols(fk.get("constrained_columns")),
+                        "referred_columns": native_cols(fk.get("referred_columns")),
+                        "referred_table": native(fk.get("referred_table")),
+                        "referred_schema": native(fk.get("referred_schema")),
+                    }
+                    for fk in fks
+                ]
                 extracted.append(
-                    {"schema": schema or "", "name": name, "kind": kind, "columns": cols, "pk": pk, "fks": fks, "comment": comment}
+                    {
+                        "schema": native(schema) or "", "name": native(name), "kind": kind, "columns": cols,
+                        "pk": native_cols(pk), "fks": fks, "comment": comment,
+                    }
                 )
 
-        table_ids = self._upsert_catalog(ds, extracted)
+        if tables is not None and not extracted:
+            warnings.append(f"The table filter {', '.join(tables.patterns)} matched no table or view.")
+        table_ids = self._upsert_catalog(
+            ds, extracted, tables, unread=unread, unlisted=unlisted, login_schema=login_schema
+        )
         self._sync_declared_fks(ds, extracted, table_ids, warnings)
 
         profiled = 0
         if profile:
+            # Only what this scan read: earlier areas of a filtered catalog are not re-profiled.
+            scanned = set(table_ids.values())
             for table in self.store.tables(ds["id"]):
-                if self._profile_table(ds, table, warnings):
+                if table["id"] in scanned and self._profile_table(ds, table, warnings):
                     profiled += 1
 
         inferred_summary: dict[str, Any] = {}
         if infer:
-            inferred_summary = self.infer_relationships(ds, probe=profile)
+            # A filtered scan probes only candidate joins that touch what it read.
+            scanned_ids = set(table_ids.values()) if tables is not None else None
+            inferred_summary = self.infer_relationships(ds, probe=profile, scanned=scanned_ids)
 
         with self.store.tx() as con:
             con.execute(
@@ -135,11 +245,22 @@ class Scanner:
             "tables": len(extracted),
             "columns": sum(len(t["columns"]) for t in extracted),
             "profiled_tables": profiled,
+            **({"table_filter": tables.patterns, "skipped_by_filter": skipped} if tables is not None else {}),
             **inferred_summary,
             "warnings": warnings[:30],
         }
 
-    def _upsert_catalog(self, ds: dict[str, Any], extracted: list[dict[str, Any]]) -> dict[tuple[str, str], str]:
+    def _upsert_catalog(
+        self,
+        ds: dict[str, Any],
+        extracted: list[dict[str, Any]],
+        table_filter: TableFilter | None = None,
+        *,
+        unread: Iterable[tuple[str, str]] = (),
+        unlisted: Iterable[str] = (),
+        login_schema: str = "",
+    ) -> dict[tuple[str, str], str]:
+        unread, unlisted = set(unread), set(unlisted)
         existing = {(t["schema_name"], t["name"]): t for t in self.store.tables(ds["id"])}
         seen: dict[tuple[str, str], str] = {}
         with self.store.tx() as con:
@@ -196,7 +317,12 @@ class Scanner:
                     if name not in new_names:
                         con.execute("DELETE FROM catalog_column WHERE id = ?", (old["id"],))
             for key, row in existing.items():
-                if key not in seen:
+                # Only tables the scan covered, listed and did not find are gone from the database.
+                # Tables outside the filter, tables whose reflection failed and tables in a schema
+                # that could not be listed were not looked at, so they are kept.
+                if key in seen or key in unread or key[0] in unlisted:
+                    continue
+                if table_filter is None or table_filter.matches(key[0], key[1], login_schema):
                     con.execute("DELETE FROM catalog_table WHERE id = ?", (row["id"],))
         return seen
 
@@ -311,7 +437,12 @@ class Scanner:
         return True
 
     # --------------------------------------------------------------- inference
-    def infer_relationships(self, ds: dict[str, Any], *, probe: bool = True) -> dict[str, Any]:
+    def infer_relationships(
+        self, ds: dict[str, Any], *, probe: bool = True, scanned: set[str] | None = None
+    ) -> dict[str, Any]:
+        """Infer keys and joins. With *scanned* (table ids a filtered scan read), candidate pairs with
+        neither side among them keep their stored relationship and are not probed again, so a small
+        filtered scan stays fast on a large catalog."""
         tables = self.store.tables(ds["id"])
         columns_by_table = {t["id"]: self.store.columns(t["id"]) for t in tables}
 
@@ -341,6 +472,10 @@ class Scanner:
             key = (cand.source["id"], cand.target["id"])
             if key in locked:
                 kept.add(key)
+                continue
+            if scanned is not None and cand.source["table_id"] not in scanned and cand.target["table_id"] not in scanned:
+                if key in existing:
+                    kept.add(key)  # the evidence from the scan that read these tables stands
                 continue
             if with_probe:
                 inference.probe_containment(
