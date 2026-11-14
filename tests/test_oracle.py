@@ -111,6 +111,13 @@ def test_currval_and_nextval_are_ordinary_columns_elsewhere(dialect):
         "SELECT utl_inaddr.get_host_name FROM dual",  # package function without parentheses
         "SELECT sys.dbms_xmlgen.getxml FROM dual",
         "SELECT o.status, dbms_session.unique_session_id FROM orders o",
+        # An alias in a subquery does not hide the package from the outer query, so such aliases are refused.
+        "SELECT utl_inaddr.get_host_name FROM dual WHERE EXISTS (SELECT 1 FROM dual utl_inaddr)",
+        "SELECT sys.database_name FROM dual WHERE EXISTS (SELECT 1 FROM dual sys)",
+        "SELECT x.n FROM (SELECT dbms_session.unique_session_id AS n FROM dual) x, dual dbms_session",
+        "SELECT utl_x.status FROM orders utl_x",
+        "WITH dbms_x AS (SELECT status FROM orders) SELECT dbms_x.status FROM dbms_x",
+        "SELECT sys.status FROM (SELECT status FROM orders) sys",
         "SELECT * FROM orders FOR UPDATE",
         "DELETE FROM orders",
         "BEGIN NULL; END;",
@@ -128,12 +135,23 @@ def test_oracle_guard_rejects(sql):
         "SELECT o.status, COUNT(*) FROM orders o GROUP BY o.status FETCH FIRST 5 ROWS ONLY",
         "SELECT * FROM orders WHERE ROWNUM <= 5",
         "SELECT NVL(o.status, 'x'), TO_CHAR(o.order_date) FROM orders o",
-        "SELECT utl_x.status FROM orders utl_x",  # an alias, not a package
-        "WITH dbms_x AS (SELECT status FROM orders) SELECT dbms_x.status FROM dbms_x",
+        "SELECT o.status FROM orders o WHERE EXISTS (SELECT 1 FROM orders o2 WHERE o2.status = o.status)",
     ],
 )
 def test_oracle_guard_accepts_reads(sql):
     guard_sources(guard_readonly(sql, "oracle"), [("", "ORDERS"), *builtin_sources("oracle")])
+
+
+def test_a_catalog_table_named_like_a_package_is_readable():
+    """UTL_LOG is a table here, so utl_log.status is a column; under an alias it stays one."""
+    catalog = [("", "UTL_LOG"), *builtin_sources("oracle")]
+    for sql in ("SELECT utl_log.status FROM utl_log", "SELECT l.status FROM utl_log l"):
+        guard_sources(guard_readonly(sql, "oracle"), catalog)
+
+
+def test_package_like_aliases_are_fine_elsewhere():
+    guard_readonly("SELECT utl_x.status FROM orders utl_x", "postgres")
+    guard_readonly("SELECT sys.status FROM orders sys", "mysql")
 
 
 @pytest.mark.parametrize(
@@ -279,6 +297,7 @@ def test_oracle_is_read_only(ora_svc):
         "SELECT dbms_xmlgen.getxml('select 1 from dual') FROM orders",
         "SELECT ao_test_seq.nextval FROM orders",
         "SELECT utl_inaddr.get_host_name FROM dual",
+        "SELECT dbms_session.unique_session_id FROM dual WHERE EXISTS (SELECT 1 FROM dual dbms_session)",
         "SELECT httpuritype('http://example.com').getclob() FROM DUAL",
     ):
         with pytest.raises(OntologyError):

@@ -617,7 +617,8 @@ Not carried over from Auto Ontology: the web UI and REST API, users, groups and 
 The server writes in exactly one place: `~/.auto-ontology-mcp/knowledge.sqlite`, through the knowledge tools, which build parameterized statements from validated input. `run_sql` cannot write there either. Connected databases are only ever read, enforced in three layers:
 
 1. **SQL guard.** One `SELECT`, `WITH` or set operation per call. DML, DDL, `PRAGMA`, `ATTACH`, `SELECT … INTO`, `FOR UPDATE` and functions that reach files, other servers or server state (`pg_read_file`, `dblink`, `LOAD_FILE`, `set_config`, `load_extension`, ...) are refused. Row sources are allow-listed against the scanned catalog, which also blocks `sqlite_master`, DuckDB's `FROM '/path/to/file'` and `OPENQUERY`. Oracle's one-row `DUAL` is the only extra source allowed. On Oracle the guard also refuses:
-   - calls into `DBMS_*`/`UTL_*` packages and system owners (`SYS`, `CTXSYS`, `XDB`, ...), even when qualified (`sys.dbms_xmlgen.getxml(...)`);
+   - calls into `DBMS_*`/`UTL_*` packages and system owners (`SYS`, `CTXSYS`, `XDB`, ...), even when qualified (`sys.dbms_xmlgen.getxml(...)`) or written without parentheses (`utl_inaddr.get_host_name`);
+   - table aliases and CTE names spelled like those packages or owners (`FROM orders utl_x`), because such an alias could hide a package call;
    - the URI types (`HTTPURITYPE`, ...) and `BFILENAME`;
    - sequence `NEXTVAL`/`CURRVAL`.
 2. **Read-only connections.** SQLite opens with `mode=ro`, PostgreSQL with `default_transaction_read_only`, DuckDB with `read_only`, MySQL with a read-only session, and Oracle runs `SET TRANSACTION READ ONLY` at the start of every transaction. A PL/SQL function declared `PRAGMA AUTONOMOUS_TRANSACTION` can still write outside that transaction, so on Oracle a read-only account matters even more.

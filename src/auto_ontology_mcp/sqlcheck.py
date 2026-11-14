@@ -158,27 +158,40 @@ def _forbidden_qualifier(part: str, dialect: str | None) -> bool:
     return dialect == "oracle" and part in _FORBIDDEN_QUALIFIERS
 
 
-def _query_names(tree: exp.Expression) -> set[str]:
-    """Table names, aliases and CTE names the query defines; a column qualified by one is a real column."""
-    names = {cte.alias_or_name.casefold() for cte in tree.find_all(exp.CTE)}
-    for table in tree.find_all(exp.Table):
-        names.add(table.name.casefold())
-        if table.alias:
-            names.add(table.alias.casefold())
-    for sub in tree.find_all(exp.Subquery):
-        if sub.alias:
-            names.add(sub.alias.casefold())
-    return names
+def _oracle_package_name(name: str) -> bool:
+    return name in _FORBIDDEN_QUALIFIERS or name.startswith(_ORACLE_PACKAGE_PREFIXES)
 
 
-def _package_column(column: exp.Column, defined: set[str]) -> str | None:
+def _package_alias(tree: exp.Expression) -> str | None:
+    """A table alias, subquery alias or CTE name spelled like an Oracle package or system owner.
+
+    Such a name is refused outright. Exempting columns qualified by it would have to follow
+    Oracle's scoping exactly: an alias inside a subquery is not visible outside it, so
+    ``SELECT utl_inaddr.get_host_name FROM dual WHERE EXISTS (SELECT 1 FROM dual utl_inaddr)``
+    still calls the package.
+    """
+    for node in tree.find_all(exp.TableAlias, exp.CTE):
+        name = (node.alias_or_name if isinstance(node, exp.CTE) else node.name).casefold()
+        if _oracle_package_name(name):
+            return name
+    return None
+
+
+def _table_names(tree: exp.Expression) -> set[str]:
+    """Names of the tables the query reads; guard_sources checks them against the catalog."""
+    return {table.name.casefold() for table in tree.find_all(exp.Table)}
+
+
+def _package_column(column: exp.Column, tables: set[str]) -> str | None:
     """Oracle calls a zero-argument package function without parentheses (``utl_inaddr.get_host_name``),
-    which parses as a qualified column. Returns the offending qualifier, if any."""
+    which parses as a qualified column. Returns the offending qualifier, if any.
+
+    A qualifier that is a table the query reads is a real column (a catalog table may be called
+    ``UTL_LOG``); a table of that name in the user's schema also hides the package from Oracle.
+    """
     for part in column.parts[:-1]:
         name = part.name.casefold()
-        if name in defined:
-            continue
-        if name in _FORBIDDEN_QUALIFIERS or name.startswith(_ORACLE_PACKAGE_PREFIXES):
+        if name not in tables and _oracle_package_name(name):
             return name
     return None
 
@@ -239,7 +252,13 @@ def guard_readonly(sql: str, dialect: str | None) -> exp.Expression:
         raise SqlGuardError(
             f"Only SELECT queries are allowed (got {type(tree).__name__.upper()})."
         )
-    defined = _query_names(tree) if dialect == "oracle" else set()
+    tables: set[str] = set()
+    if dialect == "oracle":
+        if alias := _package_alias(tree):
+            raise SqlGuardError(
+                f"The alias {alias} is spelled like an Oracle package or system owner. Use another alias."
+            )
+        tables = _table_names(tree)
     for node in tree.walk():
         if isinstance(node, _FORBIDDEN_NODES):
             raise SqlGuardError(f"{type(node).__name__.upper()} is not allowed in a read-only query.")
@@ -252,7 +271,7 @@ def guard_readonly(sql: str, dialect: str | None) -> exp.Expression:
             for part in [*_qualifier_segments(node), *name.split(".")[:-1]]:
                 if _forbidden_qualifier(part, dialect) or _forbidden_function(part):
                     raise SqlGuardError(f"Calls into {part}.* are not allowed.")
-        if dialect == "oracle" and isinstance(node, exp.Column) and (part := _package_column(node, defined)):
+        if dialect == "oracle" and isinstance(node, exp.Column) and (part := _package_column(node, tables)):
             raise SqlGuardError(f"Calls into {part}.* are not allowed.")
         if dialect == "oracle" and _is_sequence_reference(node):  # elsewhere t.nextval is just a column
             raise SqlGuardError("Sequence NEXTVAL/CURRVAL is not allowed in a read-only query.")
