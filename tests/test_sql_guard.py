@@ -104,6 +104,37 @@ def test_connection_itself_is_read_only(svc):
     assert "readonly" in str(exc.value).lower() or "read-only" in str(exc.value).lower()
 
 
+def test_file_uri_datasource_is_read_only(svc, demo_path):
+    svc.add_datasource("uri", f"sqlite:///file:{demo_path}?uri=true&mode=rwc", scan=False)
+    ds = svc.ds("uri")
+    assert svc.connections.run_readonly(ds, "SELECT COUNT(*) AS n FROM orders").rows == [[3200]]
+    with pytest.raises(Exception) as exc:
+        svc.connections.run_readonly(ds, "DELETE FROM orders")
+    assert "readonly" in str(exc.value).lower() or "read-only" in str(exc.value).lower()
+
+
+@pytest.mark.parametrize("url", [
+    f"sqlite:///file:{{demo_path}}%23?uri=true",
+    f"sqlite:///file:{{demo_path}}%3F?uri=true",
+    # the decoded '#' lands in a query value, which pysqlite appends after the '?'
+    f"sqlite:///file:{{demo_path}}?uri=true&foo=1%23x&mode=rwc",
+])
+def test_file_uri_fragment_or_query_in_path_is_refused(svc, demo_path, url):
+    # A decoded '#' anywhere would turn the appended mode=ro into a URI fragment
+    # SQLite ignores, i.e. a writable datasource, so add_datasource must refuse it.
+    with pytest.raises(OntologyError):
+        svc.add_datasource("bad", url.format(demo_path=demo_path), scan=False)
+
+
+def test_file_uri_preserves_other_query_options(svc, demo_path):
+    svc.add_datasource("opts", f"sqlite:///file:{demo_path}?uri=true&immutable=1&mode=rwc", scan=False)
+    ds = svc.ds("opts")
+    assert svc.connections.run_readonly(ds, "SELECT COUNT(*) AS n FROM orders").rows == [[3200]]
+    with pytest.raises(Exception) as exc:
+        svc.connections.run_readonly(ds, "DELETE FROM orders")
+    assert "readonly" in str(exc.value).lower() or "read-only" in str(exc.value).lower()
+
+
 def test_extract_expressions_mines_business_logic():
     exprs = extract_expressions(
         "SELECT SUM(l.line_total) FROM order_lines l JOIN orders o ON o.order_id = l.order_id "
