@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable
 
 import sqlglot
-from sqlglot import exp
+from sqlglot import TokenType, exp
 from sqlglot.errors import ErrorLevel
 from sqlglot.optimizer.qualify import qualify
 from sqlglot.optimizer.scope import Scope, traverse_scope
@@ -228,10 +228,20 @@ def guard_sources(tree: exp.Expression, catalog_tables: Iterable[tuple[str, str]
 
 
 def parse_one(sql: str, dialect: str | None) -> exp.Expression:
-    statements = [s for s in sqlglot.parse(sql, read=dialect, error_level=ErrorLevel.RAISE) if s is not None]
+    # A trailing ";" after a comment parses as a bare Semicolon node, not a second statement.
+    statements = [s for s in sqlglot.parse(sql, read=dialect, error_level=ErrorLevel.RAISE)
+                  if s is not None and not isinstance(s, exp.Semicolon)]
     if len(statements) != 1:
         raise SqlGuardError(f"Expected exactly one statement, got {len(statements)}.")
     return statements[0]
+
+
+def first_statement(sql: str, dialect: str | None) -> str:
+    """*sql* cut at its first statement-ending ';'; trailing comments go with it."""
+    for token in sqlglot.tokenize(sql, read=dialect):
+        if token.token_type == TokenType.SEMICOLON:
+            return sql[: token.start]
+    return sql
 
 
 def guard_readonly(sql: str, dialect: str | None) -> exp.Expression:

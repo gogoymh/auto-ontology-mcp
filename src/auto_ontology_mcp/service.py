@@ -32,7 +32,7 @@ from .knowledge import KNOWLEDGE_DS, SOURCES_TABLE, Knowledge, is_builtin
 from .naming import clean_label, compact, id_base, to_label
 from .profiling import is_numeric_type
 from .search import build_docs, search
-from .sqlcheck import SqlGuardError, analyze, extract_expressions, guard_readonly, guard_sources, normalize_sql
+from .sqlcheck import SqlGuardError, analyze, extract_expressions, first_statement, guard_readonly, guard_sources, normalize_sql
 from .store import Store, new_id, now
 from .validation import Validator, limited, qtable
 
@@ -1807,7 +1807,7 @@ class OntologyService:
         static = validator.validate(sql, probe=False, scale=True, question=question)
         qid = new_id("q")
         try:
-            result = self.connections.run_readonly(ds, sql.strip().rstrip(";"), max_rows=cap)
+            result = self.connections.run_readonly(ds, first_statement(sql.strip(), dialect), max_rows=cap)
         except Exception as exc:  # noqa: BLE001
             err = short_error(exc)
             self.store.insert("query_log", {"id": qid, "datasource_id": ds["id"], "question": question, "sql": sql, "status": "error", "error": err, "executed_at": now()})

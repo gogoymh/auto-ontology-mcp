@@ -14,6 +14,7 @@ from auto_ontology_mcp.sqlcheck import SqlGuardError, extract_expressions, guard
         "INSERT INTO tags VALUES (99, 'x')",
         "DROP TABLE orders",
         "SELECT 1; DELETE FROM orders",
+        "SELECT 1; ; DELETE FROM orders",
         "PRAGMA table_info(orders)",
         "ATTACH DATABASE '/tmp/x.db' AS x",
         "CREATE TABLE t AS SELECT 1",
@@ -36,6 +37,7 @@ def test_guard_rejects_writes(sql):
         "SELECT o.status, COUNT(*) FROM orders o GROUP BY 1",
         "WITH x AS (SELECT * FROM orders) SELECT COUNT(*) FROM x",
         "SELECT 1 UNION ALL SELECT 2",
+        "SELECT 1; /* done */",
     ],
 )
 def test_guard_accepts_reads(sql):
@@ -89,6 +91,20 @@ def test_run_sql_refuses_uncataloged_sources(svc):
     with pytest.raises(OntologyError) as exc:
         svc.run_sql("SELECT name, sql FROM sqlite_master")
     assert "not in the catalog" in str(exc.value)
+
+
+def test_run_sql_sends_the_first_statement_to_the_driver(svc, monkeypatch):
+    real = svc.connections.run_readonly
+    seen: list[str] = []
+
+    def capture(ds, sql, *, max_rows=None, params=None):
+        seen.append(sql)
+        return real(ds, sql, max_rows=max_rows)
+
+    monkeypatch.setattr(svc.connections, "run_readonly", capture)
+    result = svc.run_sql("SELECT COUNT(*) AS n FROM orders; /* done */")
+    assert seen == ["SELECT COUNT(*) AS n FROM orders"]
+    assert result["rows"] == [[3200]]
 
 
 def test_run_sql_refuses_writes_and_data_is_untouched(svc):
