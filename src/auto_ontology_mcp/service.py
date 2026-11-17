@@ -234,8 +234,10 @@ class OntologyService:
         if not self.settings.allow_datasource_tools:
             raise OntologyError("Adding datasources over MCP is disabled on this server (AUTO_ONTOLOGY_ALLOW_DATASOURCE_TOOLS=0).")
         name = (name or "").strip()
-        if not name or len(name) > 64:
-            raise OntologyError("Give the datasource a short name (1-64 characters).")
+
+        # The name becomes a directory name under the wiki export, so no path separators.
+        if not name or len(name) > 64 or "/" in name or "\\" in name or "\0" in name or name in (".", ".."):
+            raise OntologyError("Give the datasource a short name (1-64 characters, no path separators).")
         try:
             url = normalize_url(url)
         except Exception as exc:  # noqa: BLE001
@@ -1327,6 +1329,8 @@ class OntologyService:
             default = self.knowledge.wiki_dir
         else:
             default = self.settings.home / "wiki" / ds["name"]
+            if not default.resolve().is_relative_to((self.settings.home / "wiki").resolve()):
+                raise OntologyError(f"Datasource name {ds['name']!r} is not a safe directory name; rename the datasource before exporting.")
         target = Path(directory).expanduser() if directory else default
         return export_wiki(self, ds, target)
 

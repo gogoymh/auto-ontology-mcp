@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from auto_ontology_mcp.service import OntologyError
+from auto_ontology_mcp.store import new_id, now
 
 
 def test_modeling_progress_and_validation(svc):
@@ -377,6 +378,31 @@ def test_a_glossary_entry_alone_does_not_cover_a_phrase(modeled):
     nps = modeled.check_answerable("NPS by segment", ["NPS"])["entities"][0]
     assert nps["glossary"]["name"] == "NPS"
     assert nps["state"] not in ("covered", "covered_via_glossary")
+
+
+def test_datasource_name_cannot_escape_the_wiki_directory(svc):
+    for bad in ["../../pwned", "/abs", "a/b", "a\\b", "..", "."]:
+        with pytest.raises(OntologyError) as exc:
+            svc.add_datasource(bad, "sqlite:///:memory:", scan=False)
+        assert "1-64 characters" in str(exc.value)
+    for good in ["shop", "shop db", "shop-db", "shop.db", "shop_db", "데이터", "sales (prod)", "R&D", "prod@eu"]:
+        svc.add_datasource(good, "sqlite:///:memory:", scan=False)
+
+
+def test_export_wiki_refuses_a_legacy_unsafe_datasource_name(svc):
+    # A row stored before the name check bypasses add_datasource, so export_wiki must guard itself.
+    svc.store.insert("datasource", {
+        "id": new_id("ds"),
+        "name": "../../pwned",
+        "url": "sqlite:///:memory:",
+        "description": None,
+        "schemas": None,
+        "table_filter": None,
+        "created_at": now(),
+    })
+    with pytest.raises(OntologyError) as exc:
+        svc.export_wiki("../../pwned")
+    assert "rename" in str(exc.value)
 
 
 def test_export_import_roundtrip(modeled, settings, demo_path, tmp_path):
