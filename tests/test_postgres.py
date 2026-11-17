@@ -68,6 +68,12 @@ def test_postgres_scan_model_and_query(pg_svc):
     assert out["row_count"] > 0
 
 
+def test_postgres_handles_percent_signs(pg_svc):
+    rows = pg_svc.run_sql("SELECT COUNT(*) AS n FROM sales.orders WHERE status LIKE '%live%'")["rows"]
+    assert isinstance(rows[0][0], int) and rows[0][0] > 0
+    assert pg_svc.run_sql("SELECT 7 % 3 AS r FROM sales.orders LIMIT 1")["rows"] == [[1]]
+
+
 def test_postgres_is_read_only(pg_svc):
     for bad in ("DELETE FROM sales.orders", "SELECT pg_read_file('/etc/passwd')", "SELECT set_config('a', 'b', false)"):
         with pytest.raises(OntologyError):

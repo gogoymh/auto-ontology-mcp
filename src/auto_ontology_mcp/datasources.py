@@ -286,14 +286,17 @@ class Connections:
         sql: str,
         *,
         max_rows: int | None = None,
-        params: dict[str, Any] | None = None,
     ) -> QueryResult:
         """Execute *sql* (already guarded) and fetch at most ``max_rows`` rows."""
         engine = self.engine(datasource)
         with engine.connect() as con:
             timer = _arm_timeout(con, engine.dialect.name, self.timeout_s)
             try:
-                result = con.execute(sa.text(sql), params or {})
+                # exec_driver_sql, not text(): text() parses ":word" inside string literals
+                # as a bind parameter and refuses to run the query.
+                # no_parameters=True: with a (possibly empty) parameter set psycopg parses
+                # the SQL for '%' placeholders, so LIKE '%…%' and modulo would be refused.
+                result = con.execution_options(no_parameters=True).exec_driver_sql(sql)
                 if not result.returns_rows:
                     return QueryResult(columns=[], rows=[], truncated=False)
                 if keeps_native_names(engine.dialect) and result.cursor is not None:

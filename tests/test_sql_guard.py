@@ -97,6 +97,17 @@ def test_run_sql_refuses_writes_and_data_is_untouched(svc):
     assert svc.run_sql("SELECT COUNT(*) AS n FROM orders")["rows"] == [[3200]]
 
 
+def test_run_sql_handles_colons_inside_string_literals(svc):
+    assert svc.run_sql("SELECT 'a :bar b' AS v FROM orders LIMIT 1")["rows"] == [["a :bar b"]]
+    assert svc.run_sql("SELECT '{\"a\":1}' AS v FROM orders LIMIT 1")["rows"] == [['{"a":1}']]
+
+
+def test_run_sql_handles_percent_signs(svc):
+    rows = svc.run_sql("SELECT COUNT(*) AS n FROM orders WHERE status LIKE '%live%'")["rows"]
+    assert isinstance(rows[0][0], int) and rows[0][0] > 0
+    assert svc.run_sql("SELECT 7 % 3 AS r FROM orders LIMIT 1")["rows"] == [[1]]
+
+
 def test_connection_itself_is_read_only(svc):
     ds = svc.ds()
     with pytest.raises(Exception) as exc:
