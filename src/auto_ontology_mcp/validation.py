@@ -45,12 +45,12 @@ def literal(value: Any) -> exp.Expression:
 def limited(tree: exp.Expression, n: int, dialect: str | None) -> exp.Expression:
     """*tree* with at most *n* rows, for dry runs and probes.
 
-    Usually ``SELECT * FROM (<query>) aoq`` with a row limit. Oracle refuses that wrap
-    when two output columns share a name (ORA-00918, as in ``SELECT o.id, c.id``), so
-    there the limit goes on the statement itself: sqlglot renders it as a trailing
-    ``FETCH FIRST n ROWS ONLY``, also after an ORDER BY or a UNION.
+    Usually ``SELECT * FROM (<query>) aoq`` with a row limit. Oracle, MySQL and SQL Server
+    refuse that wrap when two output columns share a name (ORA-00918, as in ``SELECT o.id,
+    c.id``), so there the limit goes on the statement itself: sqlglot renders it as
+    ``FETCH FIRST`` / ``LIMIT`` / ``TOP``, also after an ORDER BY or a UNION.
     """
-    if dialect == "oracle" and isinstance(tree, (exp.Select, exp.SetOperation)):
+    if dialect in ("oracle", "mysql", "tsql") and isinstance(tree, (exp.Select, exp.SetOperation)):
         return tree.copy().limit(n)
     return exp.select("*").from_(tree.copy().subquery("aoq")).limit(n)
 

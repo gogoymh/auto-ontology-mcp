@@ -203,6 +203,14 @@ def test_oracle_dry_run_does_not_wrap_the_query(sql):
     assert "aoq" in limited(sqlglot.parse_one(sql), 1, "postgres").sql(dialect="postgres")  # other dialects as before
 
 
+def test_dry_run_limit_avoids_the_duplicate_column_wrap():
+    tree = sqlglot.parse_one("SELECT o.id, c.id FROM orders o JOIN customers c ON o.c_id = c.id", read="mysql")
+    for dialect in ("oracle", "mysql", "tsql"):
+        # These backends refuse SELECT * FROM (<query>) aoq when two output columns share a name.
+        assert "aoq" not in limited(tree, 0, dialect).sql(dialect=dialect)
+    assert "aoq" in limited(tree, 0, "sqlite").sql(dialect="sqlite")
+
+
 @pytest.mark.parametrize(
     "sql",
     [
