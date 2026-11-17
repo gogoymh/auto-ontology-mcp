@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from auto_ontology_mcp.datasources import _MAX_VALUE_CHARS
 from auto_ontology_mcp.service import OntologyError
 from auto_ontology_mcp.sqlcheck import SqlGuardError, extract_expressions, guard_readonly, guard_sources
 
@@ -52,11 +53,23 @@ def test_guard_accepts_reads(sql):
         ("duckdb", "SELECT * FROM query('select 1')"),
         ("postgres", "COPY (SELECT 1) TO PROGRAM 'id'"),
         ("postgres", "EXPLAIN ANALYZE DELETE FROM orders"),
+        ("sqlite", "SELECT zeroblob(5000000000) FROM orders"),
+        ("sqlite", "SELECT randomblob(2000000000) FROM orders"),
     ],
 )
 def test_guard_rejects_dangerous_functions(dialect, sql):
     with pytest.raises(SqlGuardError):
         guard_readonly(sql, dialect)
+
+
+def test_run_sql_truncates_oversized_values(svc):
+    marker = f"... [{200000:,} chars truncated]"
+    cell = svc.run_sql("SELECT printf('%.*c', 200000, 'x') AS v FROM orders LIMIT 1")["rows"][0][0]
+    assert cell[:_MAX_VALUE_CHARS] == "x" * _MAX_VALUE_CHARS
+    assert cell.endswith(marker)
+    assert len(cell) == _MAX_VALUE_CHARS + len(marker)
+    status = svc.run_sql("SELECT status FROM orders LIMIT 1")["rows"][0][0]
+    assert status in {"Delivered", "Shipped", "Placed", "Cancelled", "Returned"}
 
 
 @pytest.mark.parametrize(

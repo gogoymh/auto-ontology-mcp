@@ -246,6 +246,16 @@ def json_value(value: Any) -> Any:
     return str(value)
 
 
+# printf('%.*c', N, 'x') returns N chars near-instantly, so the statement timeout never fires.
+_MAX_VALUE_CHARS = 100_000
+
+
+def _cap(value: Any) -> Any:
+    if isinstance(value, str) and len(value) > _MAX_VALUE_CHARS:
+        return value[:_MAX_VALUE_CHARS] + f"... [{len(value):,} chars truncated]"
+    return value
+
+
 class Connections:
     """Caches one read-only engine per datasource."""
 
@@ -308,7 +318,7 @@ class Connections:
                     fetched = result.fetchmany(max_rows + 1)
                     truncated = len(fetched) > max_rows
                     fetched = fetched[:max_rows]
-                rows = [[json_value(v) for v in row] for row in fetched]
+                rows = [[_cap(json_value(v)) for v in row] for row in fetched]
                 return QueryResult(columns=columns, rows=rows, truncated=truncated)
             finally:
                 if timer is not None:
