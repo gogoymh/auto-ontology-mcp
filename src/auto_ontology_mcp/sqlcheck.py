@@ -353,19 +353,52 @@ def _trace(scope: Scope, column: exp.Column, depth: int = 0) -> PhysicalColumn |
     if isinstance(source, exp.Table):
         return PhysicalColumn(schema=source.db or "", table=source.name, column=column.name)
     if isinstance(source, Scope):
-        select = source.expression
-        if isinstance(select, exp.SetOperation):
-            select = select.left
-            while isinstance(select, exp.SetOperation):
-                select = select.left
-        if not isinstance(select, exp.Select):
+        if isinstance(source.expression, exp.SetOperation):
+            # A union has no sources of its own; output column i is each branch's projection at
+            # position i. Trace that position in every branch and keep the result only when all
+            # branches resolve to the same physical column.
+            branches = getattr(source, "set_operation_scopes", None) or source.union_scopes
+            ordinal = _leaf_ordinal(branches[0], column.name) if branches else None
+            resolved = {_trace_branch(branch, column, depth + 1, ordinal) for branch in branches}
+            return resolved.pop() if len(resolved) == 1 else None
+        return _trace_output(source, column, depth)
+    return None
+
+
+def _leaf_ordinal(scope: Scope, name: str) -> int | None:
+    """Position of a union's output column *name*: its projection index in the leftmost leaf."""
+    if isinstance(scope.expression, exp.SetOperation):
+        branches = getattr(scope, "set_operation_scopes", None) or scope.union_scopes
+        return _leaf_ordinal(branches[0], name) if branches else None
+    for i, projection in enumerate(scope.expression.expressions):
+        if projection.alias_or_name == name:
+            return i
+    return None
+
+
+def _trace_branch(scope: Scope, column: exp.Column, depth: int, ordinal: int | None) -> PhysicalColumn | None:
+    """Trace a union's output column (position *ordinal*) through one branch."""
+    if isinstance(scope.expression, exp.SetOperation):
+        branches = getattr(scope, "set_operation_scopes", None) or scope.union_scopes
+        resolved = {_trace_branch(branch, column, depth + 1, ordinal) for branch in branches}
+        return resolved.pop() if len(resolved) == 1 else None
+    if ordinal is None or not isinstance(scope.expression, exp.Select) or ordinal >= len(scope.expression.expressions):
+        return None
+    projection = scope.expression.expressions[ordinal]
+    inner = projection.this if isinstance(projection, exp.Alias) else projection
+    return _trace(scope, inner, depth + 1) if isinstance(inner, exp.Column) else None
+
+
+def _trace_output(scope: Scope, column: exp.Column, depth: int) -> PhysicalColumn | None:
+    select = scope.expression
+    if not isinstance(select, exp.Select):
+        return None
+    for projection in select.expressions:
+        if projection.alias_or_name == column.name:
+            inner = projection.this if isinstance(projection, exp.Alias) else projection
+            if isinstance(inner, exp.Column):
+                return _trace(scope, inner, depth + 1)
             return None
-        for projection in select.expressions:
-            if projection.alias_or_name == column.name:
-                inner = projection.this if isinstance(projection, exp.Alias) else projection
-                if isinstance(inner, exp.Column):
-                    return _trace(source, inner, depth + 1)
-                return None
     return None
 
 

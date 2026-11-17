@@ -113,3 +113,40 @@ def test_extract_expressions_mines_business_logic():
     assert "o.status = 'Delivered'" in exprs
     assert "SUM(l.line_total)" in exprs
     assert not any(e == "o.order_id = l.order_id" for e in exprs)
+
+
+def test_validate_sql_checks_literals_through_a_union(svc):
+    plain = svc.validate_sql("SELECT COUNT(*) AS n FROM orders WHERE status = 'Delivered '")
+    assert plain["warnings"] == ["No row has orders.status = 'Delivered '. Close real values: 'Delivered'."]
+    cte = svc.validate_sql(
+        "WITH u AS (SELECT status FROM orders UNION ALL SELECT status FROM orders) "
+        "SELECT COUNT(*) AS n FROM u WHERE status = 'Delivered '"
+    )
+    derived = svc.validate_sql(
+        "SELECT COUNT(*) AS n FROM (SELECT status FROM orders UNION ALL SELECT status FROM orders) u "
+        "WHERE status = 'Delivered '"
+    )
+    assert cte["warnings"] == derived["warnings"] == plain["warnings"]
+    # Branches that resolve to different physical columns stay unchecked rather than guessed.
+    mixed = svc.validate_sql(
+        "SELECT COUNT(*) AS n FROM (SELECT customer_name AS d FROM customers UNION ALL SELECT segment AS d "
+        "FROM customers) u WHERE d = 'Zzzz nothing'"
+    )
+    assert not mixed["warnings"] and not mixed["errors"]
+
+
+def test_validate_sql_traces_nested_unions(svc):
+    plain = svc.validate_sql("SELECT COUNT(*) AS n FROM orders WHERE status = 'Delivered '")
+    three = svc.validate_sql(
+        "WITH u AS (SELECT status FROM orders UNION ALL SELECT status FROM orders "
+        "UNION ALL SELECT status FROM orders) SELECT COUNT(*) AS n FROM u WHERE status = 'Delivered '"
+    )
+    assert three["warnings"] == plain["warnings"]
+
+
+def test_validate_sql_matches_union_branches_by_position(svc):
+    swapped = svc.validate_sql(
+        "SELECT s, c FROM (SELECT status AS s, channel AS c FROM orders "
+        "UNION ALL SELECT channel AS c, status AS s FROM orders) u WHERE s = 'zzz-no-match'"
+    )
+    assert not swapped["warnings"] and not swapped["errors"]
