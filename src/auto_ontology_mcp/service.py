@@ -1426,9 +1426,9 @@ class OntologyService:
         ds = self.ds(datasource)
         docs = self._docs(ds)
         if not entities:
-            from .naming import tokens
+            from .naming import QUESTION_WORDS, tokens
 
-            entities = list(dict.fromkeys(tokens(question)))[:6]
+            entities = [t for t in dict.fromkeys(tokens(question)) if t not in QUESTION_WORDS][:6]
         results = []
         covered = 0.0
         value_budget = [60]  # columns probed across the whole question

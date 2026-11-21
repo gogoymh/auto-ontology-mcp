@@ -25,6 +25,16 @@ STOPWORDS = frozenset(
 )
 
 
+# Words a question is built from rather than a name it asks about: auxiliaries and
+# negation. Dropped from a question's own tokens only -- never from indexed field
+# text, where "Make", "Place" and "Order No" are ordinary column names.
+QUESTION_WORDS = frozenset(
+    """
+    has have had having no not
+    """.split()
+)
+
+
 def split_words(name: str) -> list[str]:
     """Split snake_case / camelCase / PascalCase / spaced names into words."""
     separated = _CAMEL_1.sub(" ", name.strip())

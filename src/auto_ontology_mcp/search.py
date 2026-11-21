@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .naming import normalize_text, tokens, trigram_similarity
+from .naming import QUESTION_WORDS, normalize_text, tokens, trigram_similarity
 
 KINDS = ("term", "attribute", "sql_attribute", "glossary", "table", "example", "source")
 
@@ -57,7 +57,11 @@ def _field_score(q_tokens: list[str], q_norm: str, text: str) -> float:
 
 
 def score(query: str, doc: Doc) -> float:
-    q_tokens = tokens(query) or tokens(query, drop_stopwords=False)
+    # A question's auxiliaries are dropped from the query only: the field text is
+    # tokenized as written, so a column literally named "Make" still scores.
+    q_tokens = [t for t in tokens(query) if t not in QUESTION_WORDS]
+    if not q_tokens:
+        q_tokens = tokens(query, drop_stopwords=False)
     if not q_tokens:
         return 0.0
     q_norm = normalize_text(query).strip()

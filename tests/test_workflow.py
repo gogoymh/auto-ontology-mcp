@@ -513,3 +513,57 @@ def test_mixed_case_names_are_quoted_for_folding_dialects():
     # A correctly quoted query resolves, and its columns are traced to the catalog.
     quoted_ok = validator.validate('SELECT "OrderDate" FROM "Orders" WHERE total / 2 > 1', probe=False)
     assert quoted_ok["valid"] and any("Integer division" in w for w in quoted_ok["warnings"])
+
+
+def test_question_grammar_is_not_an_entity(modeled):
+    """"has", "have" and "no" ask about the data; they are not entities to cover.
+
+    "has" used to arrive as an entity of its own, land in not_covered and turn an
+    otherwise answerable question into partially_answerable with the advice
+    "No Term covers: has".
+    """
+    has = modeled.check_answerable("Which region has the most employees?")
+    assert [e["entity"] for e in has["entities"]] == ["region", "employee"]
+    assert has["verdict"] == "answerable"
+
+    have = modeled.check_answerable("Which employees have no manager?")
+    assert [e["entity"] for e in have["entities"]] == ["employee", "manager"]
+    assert have["verdict"] == "answerable"
+
+
+def test_a_question_word_does_not_dilute_a_search_score(modeled):
+    """The content words score the same whether or not the question's grammar is there."""
+    question = {h["name"]: h["score"] for h in modeled.search_ontology("Which region has the most employees?")["hits"]}
+    words = {h["name"]: h["score"] for h in modeled.search_ontology("region employee")["hits"]}
+
+    assert question["Region"] == pytest.approx(words["Region"])
+    assert question["Employee"] == pytest.approx(words["Employee"])
+    assert question["Region"] > 0.5
+
+
+def test_a_field_named_like_a_question_word_is_still_searchable():
+    """`make` is a car's column name as often as it is a verb: field text keeps it.
+
+    The question's grammar is dropped from the query only. Tokenizing the indexed
+    field text with that list too would score every `Make` or `Place` column zero.
+    """
+    from auto_ontology_mcp.naming import QUESTION_WORDS, STOPWORDS, tokens
+    from auto_ontology_mcp.search import Doc, score
+
+    make = Doc("attribute", "a1", "Vehicle > Make", [("Make", 1.0)])
+    place = Doc("attribute", "a2", "Event > Place", [("Place", 1.0)])
+
+    assert score("make", make) == pytest.approx(1.0)
+    assert score("vehicle make", make) == pytest.approx(0.5)
+    assert score("place", place) == pytest.approx(1.0)
+    assert tokens("Make") == ["make"]
+    assert "make" not in STOPWORDS and "make" not in QUESTION_WORDS
+    assert "place" not in QUESTION_WORDS
+
+
+def test_domain_names_survive_the_stopword_list():
+    """A column or table name that doubles as a common word stays searchable."""
+    from auto_ontology_mcp.naming import STOPWORDS, tokens
+
+    assert tokens("orders by status") == ["order", "status"]
+    assert {"order", "status", "customer", "product", "employee"} & STOPWORDS == set()
