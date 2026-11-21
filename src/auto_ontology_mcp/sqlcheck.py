@@ -83,6 +83,9 @@ _FORBIDDEN_FUNCTIONS = frozenset(
         "writefile",
         "edit",
         "fts3_tokenizer",
+        # SQLite: a single call allocates a blob of the given size in memory.
+        "randomblob",
+        "zeroblob",
         "sleep",
         "pg_sleep",
         "benchmark",
