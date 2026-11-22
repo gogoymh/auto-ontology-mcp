@@ -26,6 +26,21 @@ class Doc:
     payload: dict[str, Any] = field(default_factory=dict)
 
 
+def _token_match(q: str, f_set: set[str]) -> float:
+    """How well one query token matches a field: 1.0 exact, else the best fuzzy match."""
+    if q in f_set:
+        return 1.0
+    best = 0.0
+    for f in f_set:
+        if len(q) >= 2 and len(f) >= 2 and not q.isascii() and (f in q or q in f):
+            best = max(best, 0.8)
+        elif abs(len(f) - len(q)) <= 3:
+            sim = trigram_similarity(q, f)
+            if sim >= 0.45:
+                best = max(best, sim * 0.8)
+    return best
+
+
 def _field_score(
     q_tokens: list[str], q_norm: str, text: str, dropped: list[str] | None = None
 ) -> float:
@@ -35,27 +50,17 @@ def _field_score(
     if not f_tokens:
         return 0.0
     f_set = set(f_tokens)
+    matches = [_token_match(q, f_set) for q in q_tokens]
     # A question word the field itself carries is part of the name the caller asked
-    # for ("Order No", "Has Children"), so it counts like any other query token.
+    # for ("Order No", "Has Children"), so it counts like any other query token, but
+    # only once a content word matches the field too: "no" alone must not make
+    # "Order No" a hit for "Which employees have no manager?".
     # One the field does not carry costs a little instead of being free.
-    present = [d for d in (dropped or []) if d in f_set]
+    present = [d for d in (dropped or []) if d in f_set] if any(m > 0 for m in matches) else []
     q_tokens = [*q_tokens, *present]
+    matches += [1.0] * len(present)
     unmatched = len(dropped or []) - len(present)
-    total = 0.0
-    for q in q_tokens:
-        if q in f_set:
-            total += 1.0
-            continue
-        best = 0.0
-        for f in f_set:
-            if len(q) >= 2 and len(f) >= 2 and not q.isascii() and (f in q or q in f):
-                best = max(best, 0.8)
-            elif abs(len(f) - len(q)) <= 3:
-                sim = trigram_similarity(q, f)
-                if sim >= 0.45:
-                    best = max(best, sim * 0.8)
-        total += best
-    coverage = total / len(q_tokens)
+    coverage = sum(matches) / len(q_tokens)
     norm_text = normalize_text(text)
     if len(q_norm) >= 3 and q_norm in norm_text:
         coverage = max(coverage, 1.0)
