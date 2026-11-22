@@ -580,6 +580,26 @@ def test_a_field_named_like_a_question_word_is_still_searchable():
     assert "place" not in QUESTION_WORDS
 
 
+def test_a_question_word_alone_does_not_make_a_field_a_hit():
+    """A field the question shares only grammar with scores nothing.
+
+    "no" in "Which employees have no manager?" is the question's negation, not a
+    reference to an `Order No` or `No` column. The field's question word counts only
+    once a content word matches the field, so `Manager` keeps its score.
+    """
+    from auto_ontology_mcp.search import Doc, score
+
+    question = "Which employees have no manager?"
+    order_no = Doc("attribute", "a1", "Order No", [("Order No", 1.0)])
+    no = Doc("attribute", "a2", "No", [("No", 1.0)])
+    manager = Doc("attribute", "a3", "Manager", [("Manager", 1.0)])
+
+    assert score(question, order_no) < 0.01
+    assert score(question, no) < 0.01
+    assert score(question, manager) >= 0.463
+    assert score("no", no) == pytest.approx(1.0)
+
+
 def test_domain_names_survive_the_stopword_list():
     """A column or table name that doubles as a common word stays searchable."""
     from auto_ontology_mcp.naming import STOPWORDS, tokens
