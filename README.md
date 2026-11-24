@@ -8,6 +8,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
   <img src="https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white" alt="Python 3.12+">
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-stdio%20%7C%20streamable%20HTTP-8250df" alt="MCP: stdio and streamable HTTP"></a>
+  <a href="https://glama.ai/mcp/servers/gogoymh/auto-ontology-mcp"><img src="https://glama.ai/mcp/servers/gogoymh/auto-ontology-mcp/badges/score.svg" alt="gogoymh/auto-ontology-mcp MCP server"></a>
 </p>
 
 <p>
