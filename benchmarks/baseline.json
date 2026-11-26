@@ -1,0 +1,1002 @@
+{
+  "schema_version": 1,
+  "tasks_version": "1",
+  "git_commit": "60be2cf",
+  "measured_at": "2026-11-26T07:29:50+00:00",
+  "python_version": "3.12.16",
+  "warmup": 1,
+  "iterations": 5,
+  "overall_score": 1.0,
+  "scores": {
+    "relationship_inference": {
+      "score": 1.0,
+      "f1": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "role_status_accuracy": 1.0,
+      "structural_accuracy": 1.0,
+      "passed": 11,
+      "total": 11,
+      "tasks": [
+        {
+          "id": "rel_cities_state",
+          "passed": true,
+          "expected": {
+            "source": "cities.state_id",
+            "target": "states.state_id",
+            "status": "accepted",
+            "role": null
+          },
+          "actual": {
+            "status": "accepted",
+            "role": null,
+            "containment": 1.0
+          }
+        },
+        {
+          "id": "rel_customers_delivery_city",
+          "passed": true,
+          "expected": {
+            "source": "customers.delivery_city_id",
+            "target": "cities.city_id",
+            "status": "accepted",
+            "role": "delivery"
+          },
+          "actual": {
+            "status": "accepted",
+            "role": "delivery",
+            "containment": 1.0
+          }
+        },
+        {
+          "id": "rel_customers_billing_city",
+          "passed": true,
+          "expected": {
+            "source": "customers.billing_city_id",
+            "target": "cities.city_id",
+            "status": "accepted",
+            "role": "billing"
+          },
+          "actual": {
+            "status": "accepted",
+            "role": "billing",
+            "containment": 1.0
+          }
+        },
+        {
+          "id": "rel_product_tags_product",
+          "passed": true,
+          "expected": {
+            "source": "product_tags.product_id",
+            "target": "products.product_id",
+            "status": "accepted",
+            "role": null
+          },
+          "actual": {
+            "status": "accepted",
+            "role": null,
+            "containment": 1.0
+          }
+        },
+        {
+          "id": "rel_product_tags_tag",
+          "passed": true,
+          "expected": {
+            "source": "product_tags.tag_id",
+            "target": "tags.tag_id",
+            "status": "accepted",
+            "role": null
+          },
+          "actual": {
+            "status": "accepted",
+            "role": null,
+            "containment": 1.0
+          }
+        },
+        {
+          "id": "rel_orders_customer",
+          "passed": true,
+          "expected": {
+            "source": "orders.customer_id",
+            "target": "customers.customer_id",
+            "status": "accepted",
+            "role": null
+          },
+          "actual": {
+            "status": "accepted",
+            "role": null,
+            "containment": 1.0
+          }
+        },
+        {
+          "id": "rel_order_lines_product",
+          "passed": true,
+          "expected": {
+            "source": "order_lines.product_id",
+            "target": "products.product_id",
+            "status": "accepted",
+            "role": null
+          },
+          "actual": {
+            "status": "accepted",
+            "role": null,
+            "containment": 1.0
+          }
+        },
+        {
+          "id": "rel_employees_manager",
+          "passed": true,
+          "expected": {
+            "source": "employees.manager_id",
+            "target": "employees.employee_id",
+            "status": "proposed",
+            "role": "manager"
+          },
+          "actual": {
+            "status": "proposed",
+            "role": "manager",
+            "containment": 1.0
+          }
+        },
+        {
+          "id": "unlinked_sales_rep",
+          "passed": true,
+          "expected": {
+            "column": "orders.sales_rep_id",
+            "target": "employees.employee_id"
+          },
+          "actual": [
+            "cities.city_id",
+            "customers.customer_id",
+            "employees.employee_id",
+            "order_lines.order_line_id",
+            "products.product_id"
+          ]
+        },
+        {
+          "id": "not_unlinked_state_code",
+          "passed": true,
+          "expected": {
+            "excluded": "states.state_code"
+          },
+          "actual": {
+            "present": false
+          }
+        },
+        {
+          "id": "junction_product_tags",
+          "passed": true,
+          "expected": {
+            "table": "product_tags",
+            "junction": true
+          },
+          "actual": {
+            "junction": "every non-key column is a foreign key (product_id, tag_id)"
+          }
+        }
+      ]
+    },
+    "ontology_search": {
+      "score": 1.0,
+      "mrr": 1.0,
+      "hit_at_1": 1.0,
+      "hit_at_3": 1.0,
+      "negative_precision": 1.0,
+      "passed": 15,
+      "total": 15,
+      "tasks": [
+        {
+          "id": "os_synonym_invoice",
+          "passed": true,
+          "rank": 1,
+          "expected_any": [
+            "Order Line"
+          ],
+          "actual_top3": [
+            "Order Line",
+            "Order Line › Order Line ID",
+            "Order Line › Revenue"
+          ]
+        },
+        {
+          "id": "os_attr_revenue",
+          "passed": true,
+          "rank": 1,
+          "expected_any": [
+            "Order Line › Net Revenue",
+            "Order Line › Revenue"
+          ],
+          "actual_top3": [
+            "Order Line › Net Revenue",
+            "Order Line › Revenue",
+            "GMV"
+          ]
+        },
+        {
+          "id": "os_korean_customer",
+          "passed": true,
+          "rank": 1,
+          "expected_any": [
+            "Customer"
+          ],
+          "actual_top3": [
+            "Customer"
+          ]
+        },
+        {
+          "id": "os_sql_attr_delivered",
+          "passed": true,
+          "rank": 1,
+          "expected_any": [
+            "Order › Delivered Orders"
+          ],
+          "actual_top3": [
+            "Order › Delivered Orders",
+            "Order",
+            "Order Line"
+          ]
+        },
+        {
+          "id": "os_sql_attr_net_revenue",
+          "passed": true,
+          "rank": 1,
+          "expected_any": [
+            "Order Line › Net Revenue"
+          ],
+          "actual_top3": [
+            "Order Line › Net Revenue",
+            "Order Line › Revenue",
+            "NPS"
+          ]
+        },
+        {
+          "id": "os_glossary_gmv",
+          "passed": true,
+          "rank": 1,
+          "expected_any": [
+            "GMV"
+          ],
+          "actual_top3": [
+            "GMV"
+          ]
+        },
+        {
+          "id": "os_typo_customer",
+          "passed": true,
+          "rank": 1,
+          "expected_any": [
+            "Customer"
+          ],
+          "actual_top3": [
+            "Customer",
+            "Customer › Customer ID",
+            "Customer › Customer Name"
+          ]
+        },
+        {
+          "id": "os_question_region",
+          "passed": true,
+          "rank": 1,
+          "expected_any": [
+            "Region",
+            "Employee"
+          ],
+          "actual_top3": [
+            "Employee",
+            "Region",
+            "Employee › Employee ID"
+          ]
+        },
+        {
+          "id": "os_question_no_manager",
+          "passed": true,
+          "rank": 1,
+          "expected_any": [
+            "Employee",
+            "Employee › Manager ID"
+          ],
+          "actual_top3": [
+            "Employee › Manager ID",
+            "Employee",
+            "Employee › Employee ID"
+          ]
+        },
+        {
+          "id": "os_attr_discount",
+          "passed": true,
+          "rank": 1,
+          "expected_any": [
+            "Order Line › Discount Fraction"
+          ],
+          "actual_top3": [
+            "Order Line › Discount Fraction",
+            "Order Line › Net Revenue",
+            "Order Line"
+          ]
+        },
+        {
+          "id": "os_term_category",
+          "passed": true,
+          "rank": 1,
+          "expected_any": [
+            "Product Category"
+          ],
+          "actual_top3": [
+            "Product Category",
+            "Product Category › Category ID",
+            "Product Category › Category Name"
+          ]
+        },
+        {
+          "id": "os_knowledge_bestseller",
+          "passed": true,
+          "rank": 1,
+          "expected_any": [
+            "Bestseller Tag"
+          ],
+          "actual_top3": [
+            "Bestseller Tag",
+            null
+          ]
+        },
+        {
+          "id": "os_knowledge_cutover",
+          "passed": true,
+          "rank": 1,
+          "expected_any": [
+            "Fulfilment Cutover"
+          ],
+          "actual_top3": [
+            "Fulfilment Cutover",
+            "Lakeshore Logistics",
+            null
+          ]
+        },
+        {
+          "id": "os_knowledge_decision",
+          "passed": true,
+          "rank": 1,
+          "expected_any": [
+            "Action Item"
+          ],
+          "actual_top3": [
+            "Action Item",
+            null
+          ]
+        },
+        {
+          "id": "os_negative_unrelated",
+          "passed": true,
+          "expected": [],
+          "actual_top3": []
+        }
+      ]
+    },
+    "fulltext_search": {
+      "score": 1.0,
+      "mrr": 1.0,
+      "hit_at_1": 1.0,
+      "hit_at_3": 1.0,
+      "negative_precision": 1.0,
+      "passed": 12,
+      "total": 12,
+      "tasks": [
+        {
+          "id": "ft_bestseller_term",
+          "passed": true,
+          "rank": 1,
+          "matched": "all words",
+          "expected_any": [
+            "Bestseller Tag"
+          ],
+          "actual_top3": [
+            "Bestseller Tag"
+          ]
+        },
+        {
+          "id": "ft_bestseller_passage",
+          "passed": true,
+          "rank": 1,
+          "matched": "all words",
+          "expected_any": [
+            "bestseller"
+          ],
+          "actual_top3": [
+            "bestseller"
+          ]
+        },
+        {
+          "id": "ft_midwest_summary",
+          "passed": true,
+          "rank": 1,
+          "matched": "all words",
+          "expected_any": [
+            "Summary"
+          ],
+          "actual_top3": [
+            "Summary"
+          ]
+        },
+        {
+          "id": "ft_ear_cushions",
+          "passed": true,
+          "rank": 1,
+          "matched": "all words",
+          "expected_any": [
+            "Noise Cancelling Headphones"
+          ],
+          "actual_top3": [
+            "Noise Cancelling Headphones"
+          ]
+        },
+        {
+          "id": "ft_wobbling_chair",
+          "passed": true,
+          "rank": 1,
+          "matched": "all words",
+          "expected_any": [
+            "Office Chair"
+          ],
+          "actual_top3": [
+            "Office Chair"
+          ]
+        },
+        {
+          "id": "ft_columbus_lakeshore",
+          "passed": true,
+          "rank": 1,
+          "matched": "all words",
+          "expected_any": [
+            "January cutover"
+          ],
+          "actual_top3": [
+            "January cutover",
+            "Decisions"
+          ]
+        },
+        {
+          "id": "ft_gas_valve",
+          "passed": true,
+          "rank": 1,
+          "matched": "all words",
+          "expected_any": [
+            "Camping Stove"
+          ],
+          "actual_top3": [
+            "Camping Stove"
+          ]
+        },
+        {
+          "id": "ft_ssd_slowdown",
+          "passed": true,
+          "rank": 1,
+          "matched": "all words",
+          "expected_any": [
+            "SSD Heat Slowdown"
+          ],
+          "actual_top3": [
+            "SSD Heat Slowdown"
+          ]
+        },
+        {
+          "id": "ft_source_quality",
+          "passed": true,
+          "rank": 1,
+          "matched": "all words",
+          "expected_any": [
+            "Product quality digest, 2024"
+          ],
+          "actual_top3": [
+            "Product quality digest, 2024"
+          ]
+        },
+        {
+          "id": "ft_term_filtered_stockout",
+          "passed": true,
+          "rank": 1,
+          "matched": "all words",
+          "expected_any": [
+            "September stockout"
+          ],
+          "actual_top3": [
+            "September stockout"
+          ]
+        },
+        {
+          "id": "ft_any_word_fallback",
+          "passed": true,
+          "rank": 1,
+          "matched": "any word",
+          "expected_any": [
+            "January cutover",
+            "September stockout",
+            "Decisions"
+          ],
+          "actual_top3": [
+            "January cutover",
+            "September stockout",
+            "Decisions"
+          ]
+        },
+        {
+          "id": "ft_negative_miss",
+          "passed": true,
+          "expected": [],
+          "actual_count": 0
+        }
+      ]
+    },
+    "check_answerable": {
+      "score": 1.0,
+      "verdict_accuracy": 1.0,
+      "detail_accuracy": 1.0,
+      "passed": 12,
+      "total": 12,
+      "tasks": [
+        {
+          "id": "ca_revenue_by_state",
+          "passed": true,
+          "expected_verdict": "answerable",
+          "actual_verdict": "answerable",
+          "actual_entities": {
+            "revenue": "covered",
+            "state": "covered"
+          },
+          "actual_link_states": [
+            "linked"
+          ]
+        },
+        {
+          "id": "ca_value_lookup",
+          "passed": true,
+          "expected_verdict": "answerable",
+          "actual_verdict": "answerable",
+          "actual_entities": {
+            "revenue": "covered",
+            "sushi roll flash drive": "covered_by_value",
+            "Pennsylvania": "covered_by_value"
+          },
+          "actual_link_states": [
+            "linked",
+            "linked",
+            "linked"
+          ]
+        },
+        {
+          "id": "ca_glossary_gmv",
+          "passed": true,
+          "expected_verdict": "answerable",
+          "actual_verdict": "answerable",
+          "actual_entities": {
+            "GMV": "covered_via_glossary",
+            "state": "covered"
+          },
+          "actual_link_states": [
+            "linked"
+          ]
+        },
+        {
+          "id": "ca_sql_attr_delivered",
+          "passed": true,
+          "expected_verdict": "answerable",
+          "actual_verdict": "answerable",
+          "actual_entities": {
+            "delivered orders": "covered"
+          },
+          "actual_link_states": []
+        },
+        {
+          "id": "ca_auto_grammar_has",
+          "passed": true,
+          "expected_verdict": "answerable",
+          "actual_verdict": "answerable",
+          "actual_entities": {
+            "region": "covered",
+            "employee": "covered"
+          },
+          "actual_link_states": [
+            "linked"
+          ]
+        },
+        {
+          "id": "ca_auto_grammar_have_no",
+          "passed": true,
+          "expected_verdict": "answerable",
+          "actual_verdict": "answerable",
+          "actual_entities": {
+            "employee": "covered",
+            "manager": "covered"
+          },
+          "actual_link_states": []
+        },
+        {
+          "id": "ca_chasm_shared_parent",
+          "passed": true,
+          "expected_verdict": "uncertain",
+          "actual_verdict": "uncertain",
+          "actual_entities": {
+            "order line": "covered",
+            "tag": "covered"
+          },
+          "actual_link_states": [
+            "only_through_shared_parent"
+          ]
+        },
+        {
+          "id": "ca_parent_in_question",
+          "passed": true,
+          "expected_verdict": "answerable",
+          "actual_verdict": "answerable",
+          "actual_entities": {
+            "revenue": "covered",
+            "tag": "covered",
+            "product": "covered"
+          },
+          "actual_link_states": [
+            "through_parent_in_question",
+            "linked",
+            "linked"
+          ]
+        },
+        {
+          "id": "ca_partial_ad_spend",
+          "passed": true,
+          "expected_verdict": "partially_answerable",
+          "actual_verdict": "partially_answerable",
+          "actual_entities": {
+            "ad spend": "not_covered",
+            "return on ad spend": "not_covered",
+            "flash drive": "covered_by_value"
+          },
+          "actual_link_states": []
+        },
+        {
+          "id": "ca_unanswerable_ads",
+          "passed": true,
+          "expected_verdict": "not_answerable",
+          "actual_verdict": "not_answerable",
+          "actual_entities": {
+            "advertising": "not_covered",
+            "click-through rate": "not_covered",
+            "campaign": "not_covered"
+          },
+          "actual_link_states": []
+        },
+        {
+          "id": "ca_glossary_unbacked_nps",
+          "passed": true,
+          "expected_verdict": "partially_answerable",
+          "actual_verdict": "partially_answerable",
+          "actual_entities": {
+            "NPS": "not_covered",
+            "segment": "covered"
+          },
+          "actual_link_states": []
+        },
+        {
+          "id": "ca_knowledge_concepts",
+          "passed": true,
+          "expected_verdict": "answerable",
+          "actual_verdict": "answerable",
+          "actual_entities": {
+            "Delivery Delay": "covered",
+            "Midwest Sales Decline 2024": "covered"
+          },
+          "actual_link_states": []
+        }
+      ]
+    },
+    "validate_sql": {
+      "score": 1.0,
+      "trap_recall": 1.0,
+      "clean_pass_rate": 1.0,
+      "precision": 1.0,
+      "f1": 1.0,
+      "passed": 26,
+      "total": 26,
+      "tasks": [
+        {
+          "id": "vs_trap_delete",
+          "is_trap": true,
+          "passed": true,
+          "expected_valid": false,
+          "actual_valid": false,
+          "errors": [
+            "Only SELECT queries are allowed (got DELETE)."
+          ],
+          "warnings": []
+        },
+        {
+          "id": "vs_trap_multistmt",
+          "is_trap": true,
+          "passed": true,
+          "expected_valid": false,
+          "actual_valid": false,
+          "errors": [
+            "Expected exactly one statement, got 2."
+          ],
+          "warnings": []
+        },
+        {
+          "id": "vs_trap_unknown_table",
+          "is_trap": true,
+          "passed": true,
+          "expected_valid": false,
+          "actual_valid": false,
+          "errors": [
+            "Table ad_spend is not in the catalog of this datasource."
+          ],
+          "warnings": []
+        },
+        {
+          "id": "vs_trap_unknown_column",
+          "is_trap": true,
+          "passed": true,
+          "expected_valid": false,
+          "actual_valid": false,
+          "errors": [
+            "Column 'revenue' could not be resolved. Line: 1, Col: 14. In the ontology, 'Revenue' (Order Line) is order_lines.line_total."
+          ],
+          "warnings": []
+        },
+        {
+          "id": "vs_trap_wrong_join",
+          "is_trap": true,
+          "passed": true,
+          "expected_valid": false,
+          "actual_valid": false,
+          "errors": [
+            "Join orders.order_id = customers.customer_id is not how the ontology joins these tables (orders.customer_id = customers.customer_id). Matching values between unrelated surrogate keys are a coincidence; use the known relationship unless the user asked for this one."
+          ],
+          "warnings": []
+        },
+        {
+          "id": "vs_trap_placeholder_false",
+          "is_trap": true,
+          "passed": true,
+          "expected_valid": false,
+          "actual_valid": false,
+          "errors": [
+            "WHERE 1 = 0 is never true, so this query returns no rows whatever the data holds. If the data cannot answer the question, say so instead of running a placeholder."
+          ],
+          "warnings": []
+        },
+        {
+          "id": "vs_trap_placeholder_null",
+          "is_trap": true,
+          "passed": true,
+          "expected_valid": false,
+          "actual_valid": false,
+          "errors": [
+            "Every selected value is the constant NULL, so this query does not read the data. If the data cannot answer the question, say so instead of running a placeholder."
+          ],
+          "warnings": []
+        },
+        {
+          "id": "vs_trap_fanout_one_side",
+          "is_trap": true,
+          "passed": true,
+          "expected_valid": true,
+          "actual_valid": true,
+          "errors": [],
+          "warnings": [
+            "Fan-out: SUM(p.unit_price) aggregates products.unit_price, but products is joined one-to-many to order_lines, so each products row is counted once per matching order_lines row. Aggregate order_lines first (subquery/CTE) or aggregate at products grain."
+          ]
+        },
+        {
+          "id": "vs_trap_fanout_sibling",
+          "is_trap": true,
+          "passed": true,
+          "expected_valid": true,
+          "actual_valid": true,
+          "errors": [],
+          "warnings": [
+            "Fan-out: SUM(l.line_total) aggregates order_lines rows, but products is also joined one-to-many to product_tags, so each order_lines row is repeated for every matching row of product_tags. order_lines and product_tags are related only through products: aggregate each one-to-many branch in its own subquery or CTE, then join the results on products."
+          ]
+        },
+        {
+          "id": "vs_trap_literal_case",
+          "is_trap": true,
+          "passed": true,
+          "expected_valid": true,
+          "actual_valid": true,
+          "errors": [],
+          "warnings": [
+            "No row has orders.status = 'shipped'. Close real values: 'Shipped'."
+          ]
+        },
+        {
+          "id": "vs_trap_literal_select",
+          "is_trap": true,
+          "passed": true,
+          "expected_valid": true,
+          "actual_valid": true,
+          "errors": [],
+          "warnings": [
+            "No row has orders.status = 'shipped'. Close real values: 'Shipped'."
+          ]
+        },
+        {
+          "id": "vs_trap_literal_product",
+          "is_trap": true,
+          "passed": true,
+          "expected_valid": true,
+          "actual_valid": true,
+          "errors": [],
+          "warnings": [
+            "No row has products.product_name = 'Sushi Roll Flash Drive'. Close real values: 'USB Food Flash Drive - Sushi Roll'."
+          ]
+        },
+        {
+          "id": "vs_trap_percent_range",
+          "is_trap": true,
+          "passed": true,
+          "expected_valid": true,
+          "actual_valid": true,
+          "errors": [],
+          "warnings": [
+            "order_lines.discount_pct > 20: order_lines.discount_pct ranges 0.0–0.3, so 20 looks like a percent against a 0–1 fraction. Did you mean 0.2?"
+          ]
+        },
+        {
+          "id": "vs_trap_percent_question",
+          "is_trap": true,
+          "passed": true,
+          "expected_valid": true,
+          "actual_valid": true,
+          "errors": [],
+          "warnings": [
+            "l.discount_pct < 0.2: the question says 0.2%, but order_lines.discount_pct holds fractions from 0 to 0.3, so 0.2% is 0.002. Did you mean 0.002?"
+          ]
+        },
+        {
+          "id": "vs_trap_integer_division",
+          "is_trap": true,
+          "passed": true,
+          "expected_valid": true,
+          "actual_valid": true,
+          "errors": [],
+          "warnings": [
+            "Integer division: both sides of SUM(order_lines.quantity) / COUNT(*) are integers, so the result is truncated to a whole number (7 / 2 = 3). If the question wants a fraction, ratio, percentage or average, cast one side: CAST(SUM(order_lines.quantity) AS REAL) / COUNT(*)."
+          ]
+        },
+        {
+          "id": "vs_trap_vacuous_groupby",
+          "is_trap": true,
+          "passed": true,
+          "expected_valid": true,
+          "actual_valid": true,
+          "errors": [],
+          "warnings": [
+            "GROUP BY orders.order_id groups by the primary key of orders, so every group is a single row and COUNT(*) aggregates one value. Group by what the question asks to break down by, or join the table whose rows are to be counted or summed per orders row."
+          ]
+        },
+        {
+          "id": "vs_trap_unaggregated_many",
+          "is_trap": true,
+          "passed": true,
+          "expected_valid": true,
+          "actual_valid": true,
+          "errors": [],
+          "warnings": [
+            "order_lines.quantity is selected without an aggregate, but the query groups by orders and order_lines has several rows per orders row, so one arbitrary value is returned (or the database rejects the query). Aggregate it (MIN, MAX, COUNT, a list) or add it to GROUP BY."
+          ]
+        },
+        {
+          "id": "vs_clean_multihop_revenue",
+          "is_trap": false,
+          "passed": true,
+          "expected_valid": true,
+          "actual_valid": true,
+          "errors": [],
+          "warnings": []
+        },
+        {
+          "id": "vs_clean_billing_role",
+          "is_trap": false,
+          "passed": true,
+          "expected_valid": true,
+          "actual_valid": true,
+          "errors": [],
+          "warnings": []
+        },
+        {
+          "id": "vs_clean_line_cost",
+          "is_trap": false,
+          "passed": true,
+          "expected_valid": true,
+          "actual_valid": true,
+          "errors": [],
+          "warnings": []
+        },
+        {
+          "id": "vs_clean_conditional_sum",
+          "is_trap": false,
+          "passed": true,
+          "expected_valid": true,
+          "actual_valid": true,
+          "errors": [],
+          "warnings": []
+        },
+        {
+          "id": "vs_clean_float_division",
+          "is_trap": false,
+          "passed": true,
+          "expected_valid": true,
+          "actual_valid": true,
+          "errors": [],
+          "warnings": []
+        },
+        {
+          "id": "vs_clean_preagg_chasm",
+          "is_trap": false,
+          "passed": true,
+          "expected_valid": true,
+          "actual_valid": true,
+          "errors": [],
+          "warnings": []
+        },
+        {
+          "id": "vs_clean_percent_scale",
+          "is_trap": false,
+          "passed": true,
+          "expected_valid": true,
+          "actual_valid": true,
+          "errors": [],
+          "warnings": []
+        },
+        {
+          "id": "vs_clean_knowledge_recursive",
+          "is_trap": false,
+          "passed": true,
+          "expected_valid": true,
+          "actual_valid": true,
+          "errors": [],
+          "warnings": []
+        },
+        {
+          "id": "vs_clean_knowledge_fts",
+          "is_trap": false,
+          "passed": true,
+          "expected_valid": true,
+          "actual_valid": true,
+          "errors": [],
+          "warnings": []
+        }
+      ]
+    }
+  },
+  "latency_ms": {
+    "scan_and_infer": {
+      "mean": 65.654,
+      "p50": 64.806,
+      "p95": 68.415,
+      "count": 5
+    },
+    "ontology_search": {
+      "mean": 7.288,
+      "p50": 5.421,
+      "p95": 24.406,
+      "count": 75
+    },
+    "fulltext_search": {
+      "mean": 1.576,
+      "p50": 1.497,
+      "p95": 2.14,
+      "count": 60
+    },
+    "check_answerable": {
+      "mean": 13.188,
+      "p50": 9.478,
+      "p95": 28.02,
+      "count": 60
+    },
+    "validate_sql": {
+      "mean": 5.474,
+      "p50": 5.087,
+      "p95": 8.507,
+      "count": 130
+    },
+    "total_suite_ms": 3642.85
+  }
+}

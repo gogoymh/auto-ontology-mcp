@@ -1,0 +1,765 @@
+{
+  "version": "1",
+  "description": "Fixed headless benchmark suite for auto-ontology-mcp against the built-in retail demo DB and demo knowledge base.",
+  "seed": 7,
+  "setup": {
+    "relationships": [
+      {
+        "action": "accept",
+        "source": "employees.manager_id",
+        "target": "employees.employee_id"
+      },
+      {
+        "action": "add",
+        "source": "orders.sales_rep_id",
+        "target": "employees.employee_id",
+        "role": "sales rep"
+      },
+      {
+        "action": "update",
+        "source": "customers.delivery_city_id",
+        "target": "cities.city_id",
+        "is_default": true
+      }
+    ],
+    "terms": {
+      "regions": [
+        {
+          "name": "Region",
+          "description": "A sales region grouping US states.",
+          "columns": [
+            {"column": "region_id", "display_name": "Region ID"},
+            {"column": "region_name", "display_name": "Region Name"}
+          ]
+        }
+      ],
+      "states": [
+        {
+          "name": "State",
+          "description": "A US state where customers live.",
+          "synonyms": ["State Province"],
+          "columns": [
+            {"column": "state_id", "display_name": "State ID"},
+            {"column": "state_name", "display_name": "State Name"},
+            {"column": "state_code", "display_name": "State Code"}
+          ]
+        }
+      ],
+      "cities": [
+        {
+          "name": "City",
+          "description": "A city used for customer delivery and billing addresses.",
+          "columns": [
+            {"column": "city_id", "display_name": "City ID"},
+            {"column": "city_name", "display_name": "City Name"},
+            {"column": "population", "display_name": "Population"}
+          ]
+        }
+      ],
+      "employees": [
+        {
+          "name": "Employee",
+          "description": "A member of the sales organization.",
+          "synonyms": ["Sales Rep"],
+          "columns": [
+            {"column": "employee_id", "display_name": "Employee ID"},
+            {"column": "full_name", "display_name": "Full Name"},
+            {"column": "job_title", "display_name": "Job Title"},
+            {"column": "manager_id", "display_name": "Manager ID"},
+            {"column": "hire_date", "display_name": "Hire Date"}
+          ]
+        }
+      ],
+      "customers": [
+        {
+          "name": "Customer",
+          "description": "A customer account; one row per customer.",
+          "synonyms": ["고객"],
+          "columns": [
+            {"column": "customer_id", "display_name": "Customer ID"},
+            {"column": "customer_name", "display_name": "Customer Name"},
+            {"column": "email", "display_name": "Email"},
+            {"column": "segment", "display_name": "Segment"},
+            {"column": "signup_date", "display_name": "Signup Date"},
+            {"column": "is_active", "display_name": "Is Active"}
+          ]
+        }
+      ],
+      "product_categories": [
+        {
+          "name": "Product Category",
+          "description": "A two-level product category tree.",
+          "columns": [
+            {"column": "category_id", "display_name": "Category ID"},
+            {"column": "category_name", "display_name": "Category Name"}
+          ]
+        }
+      ],
+      "products": [
+        {
+          "name": "Product",
+          "description": "A product in the catalog.",
+          "columns": [
+            {"column": "product_id", "display_name": "Product ID"},
+            {"column": "product_name", "display_name": "Product Name"},
+            {"column": "unit_price", "display_name": "List Price"},
+            {"column": "unit_cost", "display_name": "Unit Cost"},
+            {"column": "is_discontinued", "display_name": "Is Discontinued"}
+          ]
+        }
+      ],
+      "tags": [
+        {
+          "name": "Tag",
+          "description": "A merchandising tag.",
+          "columns": [
+            {"column": "tag_id", "display_name": "Tag ID"},
+            {"column": "tag_name", "display_name": "Tag Name"}
+          ]
+        }
+      ],
+      "orders": [
+        {
+          "name": "Order",
+          "description": "A customer order; one row per order.",
+          "columns": [
+            {"column": "order_id", "display_name": "Order ID"},
+            {"column": "order_date", "display_name": "Order Date"},
+            {"column": "status", "display_name": "Order Status"},
+            {"column": "channel", "display_name": "Sales Channel"}
+          ]
+        }
+      ],
+      "order_lines": [
+        {
+          "name": "Order Line",
+          "description": "One product line of an order; revenue lives here.",
+          "synonyms": ["Invoice Line"],
+          "columns": [
+            {"column": "order_line_id", "display_name": "Order Line ID"},
+            {"column": "quantity", "display_name": "Quantity"},
+            {"column": "unit_price", "display_name": "Unit Price"},
+            {"column": "discount_pct", "display_name": "Discount Fraction"},
+            {"column": "line_total", "display_name": "Revenue"}
+          ]
+        }
+      ]
+    },
+    "sql_attributes": [
+      {
+        "term": "Order",
+        "name": "Delivered Orders",
+        "expression": "orders.status = 'Delivered'",
+        "description": "Orders that reached the customer.",
+        "kind": "filter",
+        "status": "certified"
+      },
+      {
+        "term": "Order Line",
+        "name": "Net Revenue",
+        "expression": "SUM(order_lines.line_total)",
+        "description": "Revenue after discounts.",
+        "kind": "measure",
+        "status": "certified"
+      },
+      {
+        "term": "Product",
+        "name": "Average List Price",
+        "expression": "AVG(products.unit_price)",
+        "description": "Mean list price across products.",
+        "kind": "measure",
+        "status": "draft"
+      }
+    ],
+    "glossary": [
+      {
+        "name": "GMV",
+        "definition": "Order Line › Revenue (order_lines.line_total) summed over every order"
+      },
+      {
+        "name": "AOV",
+        "definition": "average order value"
+      },
+      {
+        "name": "NPS",
+        "definition": "net promoter score from surveys"
+      }
+    ],
+    "seed_demo_knowledge": true
+  },
+  "relationship_inference": {
+    "expected_inferred": [
+      {
+        "id": "rel_cities_state",
+        "source": "cities.state_id",
+        "target": "states.state_id",
+        "status": "accepted",
+        "role": null
+      },
+      {
+        "id": "rel_customers_delivery_city",
+        "source": "customers.delivery_city_id",
+        "target": "cities.city_id",
+        "status": "accepted",
+        "role": "delivery"
+      },
+      {
+        "id": "rel_customers_billing_city",
+        "source": "customers.billing_city_id",
+        "target": "cities.city_id",
+        "status": "accepted",
+        "role": "billing"
+      },
+      {
+        "id": "rel_product_tags_product",
+        "source": "product_tags.product_id",
+        "target": "products.product_id",
+        "status": "accepted",
+        "role": null
+      },
+      {
+        "id": "rel_product_tags_tag",
+        "source": "product_tags.tag_id",
+        "target": "tags.tag_id",
+        "status": "accepted",
+        "role": null
+      },
+      {
+        "id": "rel_orders_customer",
+        "source": "orders.customer_id",
+        "target": "customers.customer_id",
+        "status": "accepted",
+        "role": null
+      },
+      {
+        "id": "rel_order_lines_product",
+        "source": "order_lines.product_id",
+        "target": "products.product_id",
+        "status": "accepted",
+        "role": null
+      },
+      {
+        "id": "rel_employees_manager",
+        "source": "employees.manager_id",
+        "target": "employees.employee_id",
+        "status": "proposed",
+        "role": "manager"
+      }
+    ],
+    "expected_unlinked": [
+      {
+        "id": "unlinked_sales_rep",
+        "column": "orders.sales_rep_id",
+        "must_suggest_target": "employees.employee_id"
+      }
+    ],
+    "forbidden_unlinked": [
+      {
+        "id": "not_unlinked_state_code",
+        "column": "states.state_code"
+      }
+    ],
+    "expected_junctions": [
+      {
+        "id": "junction_product_tags",
+        "table": "product_tags"
+      }
+    ]
+  },
+  "ontology_search": [
+    {
+      "id": "os_synonym_invoice",
+      "datasource": "demo",
+      "query": "invoice line",
+      "expected_any": ["Order Line"]
+    },
+    {
+      "id": "os_attr_revenue",
+      "datasource": "demo",
+      "query": "revenue",
+      "expected_any": ["Order Line › Net Revenue", "Order Line › Revenue"]
+    },
+    {
+      "id": "os_korean_customer",
+      "datasource": "demo",
+      "query": "고객",
+      "expected_any": ["Customer"]
+    },
+    {
+      "id": "os_sql_attr_delivered",
+      "datasource": "demo",
+      "query": "delivered orders",
+      "expected_any": ["Order › Delivered Orders"]
+    },
+    {
+      "id": "os_sql_attr_net_revenue",
+      "datasource": "demo",
+      "query": "net revenue",
+      "expected_any": ["Order Line › Net Revenue"]
+    },
+    {
+      "id": "os_glossary_gmv",
+      "datasource": "demo",
+      "query": "GMV",
+      "expected_any": ["GMV"]
+    },
+    {
+      "id": "os_typo_customer",
+      "datasource": "demo",
+      "query": "custmer",
+      "expected_any": ["Customer"]
+    },
+    {
+      "id": "os_question_region",
+      "datasource": "demo",
+      "query": "Which region has the most employees?",
+      "expected_any": ["Region", "Employee"]
+    },
+    {
+      "id": "os_question_no_manager",
+      "datasource": "demo",
+      "query": "Which employees have no manager?",
+      "expected_any": ["Employee", "Employee › Manager ID"]
+    },
+    {
+      "id": "os_attr_discount",
+      "datasource": "demo",
+      "query": "discount fraction",
+      "expected_any": ["Order Line › Discount Fraction"]
+    },
+    {
+      "id": "os_term_category",
+      "datasource": "demo",
+      "query": "product category",
+      "expected_any": ["Product Category"]
+    },
+    {
+      "id": "os_knowledge_bestseller",
+      "datasource": "knowledge",
+      "query": "bestseller",
+      "expected_any": ["Bestseller Tag"]
+    },
+    {
+      "id": "os_knowledge_cutover",
+      "datasource": "knowledge",
+      "query": "Lakeshore cutover",
+      "expected_any": ["Fulfilment Cutover"]
+    },
+    {
+      "id": "os_knowledge_decision",
+      "datasource": "knowledge",
+      "query": "Decision",
+      "expected_any": ["Action Item"]
+    },
+    {
+      "id": "os_negative_unrelated",
+      "datasource": "demo",
+      "query": "quantum entanglement telemetry",
+      "expect_empty": true
+    }
+  ],
+  "fulltext_search": [
+    {
+      "id": "ft_bestseller_term",
+      "query": "bestseller",
+      "kinds": ["term"],
+      "expected_field": "name",
+      "expected_any": ["Bestseller Tag"]
+    },
+    {
+      "id": "ft_bestseller_passage",
+      "query": "bestseller",
+      "kinds": ["passage"],
+      "expected_field": "heading",
+      "expected_any": ["bestseller"]
+    },
+    {
+      "id": "ft_midwest_summary",
+      "query": "Midwest January September",
+      "kinds": ["passage"],
+      "expected_field": "heading",
+      "expected_any": ["Summary"]
+    },
+    {
+      "id": "ft_ear_cushions",
+      "query": "ear cushions cracked",
+      "kinds": ["passage"],
+      "expected_field": "heading",
+      "expected_any": ["Noise Cancelling Headphones"]
+    },
+    {
+      "id": "ft_wobbling_chair",
+      "query": "wobbling base",
+      "kinds": ["passage"],
+      "expected_field": "heading",
+      "expected_any": ["Office Chair"]
+    },
+    {
+      "id": "ft_columbus_lakeshore",
+      "query": "Columbus Lakeshore",
+      "kinds": ["passage"],
+      "expected_field": "heading",
+      "expected_any": ["January cutover"]
+    },
+    {
+      "id": "ft_gas_valve",
+      "query": "gas valve",
+      "kinds": ["passage"],
+      "expected_field": "heading",
+      "expected_any": ["Camping Stove"]
+    },
+    {
+      "id": "ft_ssd_slowdown",
+      "query": "slowing down hot",
+      "kinds": ["term"],
+      "expected_field": "name",
+      "expected_any": ["SSD Heat Slowdown"]
+    },
+    {
+      "id": "ft_source_quality",
+      "query": "Product quality digest",
+      "kinds": ["source"],
+      "expected_field": "title",
+      "expected_any": ["Product quality digest, 2024"]
+    },
+    {
+      "id": "ft_term_filtered_stockout",
+      "query": "stock",
+      "kinds": ["passage"],
+      "term": "September Stockout",
+      "expected_field": "heading",
+      "expected_any": ["September stockout"]
+    },
+    {
+      "id": "ft_any_word_fallback",
+      "query": "Lakeshore zebraxyz",
+      "kinds": ["passage"],
+      "expected_matched": "any word",
+      "expected_field": "heading",
+      "expected_any": ["January cutover", "September stockout", "Decisions"]
+    },
+    {
+      "id": "ft_negative_miss",
+      "query": "supernova hyperdrive",
+      "expect_empty": true
+    }
+  ],
+  "check_answerable": [
+    {
+      "id": "ca_revenue_by_state",
+      "datasource": "demo",
+      "question": "Revenue by state in 2024",
+      "entities": ["revenue", "state"],
+      "expected_verdict": "answerable",
+      "expected_link_states": ["linked"]
+    },
+    {
+      "id": "ca_value_lookup",
+      "datasource": "demo",
+      "question": "What was revenue for the sushi roll flash drive in Pennsylvania in June 2024?",
+      "entities": ["revenue", "sushi roll flash drive", "Pennsylvania"],
+      "expected_verdict": "answerable",
+      "expected_entity_states": {
+        "Pennsylvania": "covered_by_value",
+        "sushi roll flash drive": "covered_by_value"
+      }
+    },
+    {
+      "id": "ca_glossary_gmv",
+      "datasource": "demo",
+      "question": "GMV by state",
+      "entities": ["GMV", "state"],
+      "expected_verdict": "answerable",
+      "expected_entity_states": {
+        "GMV": "covered_via_glossary"
+      },
+      "expected_link_states": ["linked"]
+    },
+    {
+      "id": "ca_sql_attr_delivered",
+      "datasource": "demo",
+      "question": "How many delivered orders?",
+      "entities": ["delivered orders"],
+      "expected_verdict": "answerable"
+    },
+    {
+      "id": "ca_auto_grammar_has",
+      "datasource": "demo",
+      "question": "Which region has the most employees?",
+      "entities": null,
+      "expected_verdict": "answerable",
+      "expected_extracted_entities": ["region", "employee"]
+    },
+    {
+      "id": "ca_auto_grammar_have_no",
+      "datasource": "demo",
+      "question": "Which employees have no manager?",
+      "entities": null,
+      "expected_verdict": "answerable",
+      "expected_extracted_entities": ["employee", "manager"]
+    },
+    {
+      "id": "ca_chasm_shared_parent",
+      "datasource": "demo",
+      "question": "Which order lines belong to which tag?",
+      "entities": ["order line", "tag"],
+      "expected_verdict": "uncertain",
+      "expected_link_states": ["only_through_shared_parent"]
+    },
+    {
+      "id": "ca_parent_in_question",
+      "datasource": "demo",
+      "question": "Revenue and number of tags per product",
+      "entities": ["revenue", "tag", "product"],
+      "expected_verdict": "answerable",
+      "expected_link_states": ["through_parent_in_question"]
+    },
+    {
+      "id": "ca_partial_ad_spend",
+      "datasource": "demo",
+      "question": "Return on ad spend for flash drives",
+      "entities": ["ad spend", "return on ad spend", "flash drive"],
+      "expected_verdict": "partially_answerable",
+      "expected_entity_states": {
+        "ad spend": "not_covered"
+      }
+    },
+    {
+      "id": "ca_unanswerable_ads",
+      "datasource": "demo",
+      "question": "Advertising click-through rate by campaign",
+      "entities": ["advertising", "click-through rate", "campaign"],
+      "expected_verdict": "not_answerable"
+    },
+    {
+      "id": "ca_glossary_unbacked_nps",
+      "datasource": "demo",
+      "question": "NPS by segment",
+      "entities": ["NPS", "segment"],
+      "expected_verdict": "partially_answerable",
+      "expected_entity_states": {
+        "NPS": "not_covered"
+      }
+    },
+    {
+      "id": "ca_knowledge_concepts",
+      "datasource": "knowledge",
+      "question": "How did Delivery Delay relate to Midwest Sales Decline 2024?",
+      "entities": ["Delivery Delay", "Midwest Sales Decline 2024"],
+      "expected_verdict": "answerable"
+    }
+  ],
+  "validate_sql": [
+    {
+      "id": "vs_trap_delete",
+      "datasource": "demo",
+      "sql": "DELETE FROM orders WHERE order_id = 1",
+      "is_trap": true,
+      "expected_valid": false,
+      "expect_error_contains": ["SELECT"]
+    },
+    {
+      "id": "vs_trap_multistmt",
+      "datasource": "demo",
+      "sql": "SELECT COUNT(*) FROM orders; DROP TABLE orders",
+      "is_trap": true,
+      "expected_valid": false,
+      "expect_error_contains": ["one statement"]
+    },
+    {
+      "id": "vs_trap_unknown_table",
+      "datasource": "demo",
+      "sql": "SELECT * FROM ad_spend",
+      "is_trap": true,
+      "expected_valid": false,
+      "expect_error_contains": ["not in the catalog"]
+    },
+    {
+      "id": "vs_trap_unknown_column",
+      "datasource": "demo",
+      "sql": "SELECT revenue FROM order_lines",
+      "is_trap": true,
+      "expected_valid": false,
+      "expect_error_contains": ["order_lines.line_total"]
+    },
+    {
+      "id": "vs_trap_wrong_join",
+      "datasource": "demo",
+      "sql": "SELECT COUNT(*) FROM orders o JOIN customers c ON o.order_id = c.customer_id",
+      "is_trap": true,
+      "expected_valid": false,
+      "expect_error_contains": ["orders.customer_id = customers.customer_id"]
+    },
+    {
+      "id": "vs_trap_placeholder_false",
+      "datasource": "demo",
+      "sql": "SELECT order_id FROM orders WHERE 1 = 0",
+      "is_trap": true,
+      "expected_valid": false,
+      "expect_error_contains": ["never true"]
+    },
+    {
+      "id": "vs_trap_placeholder_null",
+      "datasource": "demo",
+      "sql": "SELECT NULL AS revenue FROM orders",
+      "is_trap": true,
+      "expected_valid": false,
+      "expect_error_contains": ["constant NULL"]
+    },
+    {
+      "id": "vs_trap_fanout_one_side",
+      "datasource": "demo",
+      "sql": "SELECT SUM(p.unit_price) FROM products p JOIN order_lines l ON l.product_id = p.product_id",
+      "is_trap": true,
+      "expected_valid": true,
+      "expect_warning_contains": ["Fan-out"]
+    },
+    {
+      "id": "vs_trap_fanout_sibling",
+      "datasource": "demo",
+      "sql": "SELECT p.product_name, SUM(l.line_total) AS revenue FROM products p JOIN order_lines l ON l.product_id = p.product_id JOIN product_tags pt ON pt.product_id = p.product_id GROUP BY p.product_name",
+      "is_trap": true,
+      "expected_valid": true,
+      "expect_warning_contains": ["Fan-out", "related only through products"]
+    },
+    {
+      "id": "vs_trap_literal_case",
+      "datasource": "demo",
+      "sql": "SELECT COUNT(*) FROM orders WHERE status = 'shipped'",
+      "is_trap": true,
+      "expected_valid": true,
+      "expect_warning_contains": ["'Shipped'"]
+    },
+    {
+      "id": "vs_trap_literal_select",
+      "datasource": "demo",
+      "sql": "SELECT SUM(o.status = 'shipped') FROM orders o",
+      "is_trap": true,
+      "expected_valid": true,
+      "expect_warning_contains": ["'Shipped'"]
+    },
+    {
+      "id": "vs_trap_literal_product",
+      "datasource": "demo",
+      "sql": "SELECT COUNT(*) FROM products WHERE product_name = 'Sushi Roll Flash Drive'",
+      "is_trap": true,
+      "expected_valid": true,
+      "expect_warning_contains": ["'USB Food Flash Drive - Sushi Roll'"]
+    },
+    {
+      "id": "vs_trap_percent_range",
+      "datasource": "demo",
+      "sql": "SELECT COUNT(*) FROM order_lines WHERE discount_pct > 20",
+      "is_trap": true,
+      "expected_valid": true,
+      "expect_warning_contains": ["Did you mean 0.2"]
+    },
+    {
+      "id": "vs_trap_percent_question",
+      "datasource": "demo",
+      "sql": "SELECT COUNT(*) FROM order_lines l WHERE l.discount_pct < 0.2",
+      "question": "How many order lines had a discount under 0.2%?",
+      "is_trap": true,
+      "expected_valid": true,
+      "expect_warning_contains": ["Did you mean 0.002"]
+    },
+    {
+      "id": "vs_trap_integer_division",
+      "datasource": "demo",
+      "sql": "SELECT SUM(quantity) / COUNT(*) FROM order_lines",
+      "is_trap": true,
+      "expected_valid": true,
+      "expect_warning_contains": ["Integer division"]
+    },
+    {
+      "id": "vs_trap_vacuous_groupby",
+      "datasource": "demo",
+      "sql": "SELECT order_id, COUNT(*) FROM orders GROUP BY order_id",
+      "is_trap": true,
+      "expected_valid": true,
+      "expect_warning_contains": ["every group is a single row"]
+    },
+    {
+      "id": "vs_trap_unaggregated_many",
+      "datasource": "demo",
+      "sql": "SELECT o.order_id, ol.quantity, COUNT(*) FROM orders o JOIN order_lines ol ON ol.order_id = o.order_id GROUP BY o.order_id",
+      "is_trap": true,
+      "expected_valid": true,
+      "expect_warning_contains": ["without an aggregate"]
+    },
+    {
+      "id": "vs_clean_multihop_revenue",
+      "datasource": "demo",
+      "sql": "SELECT s.state_name, ROUND(SUM(l.line_total), 2) AS revenue FROM order_lines l JOIN orders o ON o.order_id = l.order_id JOIN customers c ON c.customer_id = o.customer_id JOIN cities ci ON ci.city_id = c.delivery_city_id JOIN states s ON s.state_id = ci.state_id WHERE o.status = 'Delivered' GROUP BY s.state_name ORDER BY revenue DESC",
+      "is_trap": false,
+      "expected_valid": true,
+      "forbid_warnings": true
+    },
+    {
+      "id": "vs_clean_billing_role",
+      "datasource": "demo",
+      "sql": "SELECT COUNT(*) FROM customers c JOIN cities ci ON ci.city_id = c.billing_city_id",
+      "is_trap": false,
+      "expected_valid": true,
+      "forbid_warnings": true,
+      "expect_note_contains": ["'billing' role"]
+    },
+    {
+      "id": "vs_clean_line_cost",
+      "datasource": "demo",
+      "sql": "SELECT SUM(l.quantity * p.unit_cost) FROM order_lines l JOIN products p ON p.product_id = l.product_id",
+      "is_trap": false,
+      "expected_valid": true,
+      "forbid_warnings": true
+    },
+    {
+      "id": "vs_clean_conditional_sum",
+      "datasource": "demo",
+      "sql": "SELECT SUM(CASE WHEN o.order_date < '2024-01-01' THEN l.line_total END) FROM order_lines l JOIN orders o ON o.order_id = l.order_id",
+      "is_trap": false,
+      "expected_valid": true,
+      "forbid_warnings": true
+    },
+    {
+      "id": "vs_clean_float_division",
+      "datasource": "demo",
+      "sql": "SELECT CAST(SUM(quantity) AS REAL) / COUNT(*) FROM order_lines",
+      "is_trap": false,
+      "expected_valid": true,
+      "forbid_warnings": true
+    },
+    {
+      "id": "vs_clean_preagg_chasm",
+      "datasource": "demo",
+      "sql": "SELECT p.product_name, s.revenue, g.tags FROM products p JOIN (SELECT product_id, SUM(line_total) AS revenue FROM order_lines GROUP BY product_id) s ON s.product_id = p.product_id JOIN (SELECT product_id, COUNT(*) AS tags FROM product_tags GROUP BY product_id) g ON g.product_id = p.product_id",
+      "is_trap": false,
+      "expected_valid": true,
+      "forbid_warnings": true
+    },
+    {
+      "id": "vs_clean_percent_scale",
+      "datasource": "demo",
+      "sql": "SELECT COUNT(*) FROM order_lines l WHERE l.discount_pct >= 0.15",
+      "question": "discount of at least 15 percent",
+      "is_trap": false,
+      "expected_valid": true,
+      "forbid_warnings": true
+    },
+    {
+      "id": "vs_clean_knowledge_recursive",
+      "datasource": "knowledge",
+      "sql": "WITH RECURSIVE chain(id, name, relation, depth) AS (SELECT id, name, NULL, 0 FROM terms WHERE name = 'Midwest Sales Decline 2024' UNION ALL SELECT r.from_term_id, r.from_term, r.relation, chain.depth + 1 FROM term_relations r JOIN chain ON r.to_term_id = chain.id WHERE r.relation IN ('causes', 'part_of') AND chain.depth < 6) SELECT name, relation, depth FROM chain WHERE depth > 0 ORDER BY depth, name",
+      "is_trap": false,
+      "expected_valid": true,
+      "forbid_warnings": true
+    },
+    {
+      "id": "vs_clean_knowledge_fts",
+      "datasource": "knowledge",
+      "sql": "SELECT t.name AS issue, p.heading, snippet(passages_fts, -1, '[', ']', '…', 10) AS hit FROM passages_fts JOIN passages p ON p.id = passages_fts.passage_id JOIN passage_terms pt ON pt.passage_id = p.id JOIN terms t ON t.id = pt.term_id JOIN term_relations r ON r.from_term_id = t.id WHERE passages_fts MATCH '\"returns\"* OR \"back\"' AND r.relation = 'instance_of' AND r.to_term = 'Product Quality Issue' ORDER BY bm25(passages_fts)",
+      "is_trap": false,
+      "expected_valid": true,
+      "forbid_warnings": true
+    }
+  ]
+}
