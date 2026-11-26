@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__cua__mission_finish",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/polish_hook.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

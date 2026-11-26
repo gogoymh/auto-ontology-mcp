@@ -102,6 +102,8 @@ description: Rewrite text an agent wrote for people (channel messages, mission r
 3. 상태 0(`ok: no polish patterns found`)이 나올 때까지 1과 2를 되풀이한다.
 4. 고치기 전과 뒤의 수치, 파일 이름, 티켓 번호, 명령이 같은지 대조한 뒤 올린다.
 
+mission_finish는 훅이 대신 점검한다. `.claude/settings.json`에 등록한 `scripts/polish_hook.py`가 summary와 next에서 패턴을 찾으면 호출을 막고, 찾은 줄과 그 패턴의 고친 예를 보여 준다. 예처럼 문장만 고쳐 다시 부른다.
+
 스크립트는 패턴을 찾을 뿐 고치지 않는다. 일부러 남긴 표현이라 판단하면 그대로 올려도 되지만, 그 줄이 왜 괜찮은지 스스로 설명할 수 있어야 한다.
 
 점검 목록:
