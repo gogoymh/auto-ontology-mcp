@@ -1,10 +1,11 @@
-"""Lexical search over the ontology.
+"""Lexical and optional hybrid semantic search over the ontology.
 
-Auto Ontology retrieves candidates with embeddings. This server has no
-embedding model, so it scores token overlap (camel/snake-case split,
-singularized), trigram similarity for typos and inflected words, and phrase
-containment, with weights per field. The host model compensates for what a
-lexical index misses by searching again with synonyms or translations.
+By default this server runs without an embedding model, scoring token overlap
+(camel/snake-case split, singularized), trigram similarity for typos and
+inflected words, and phrase containment with weights per field. When the
+optional ``semantic`` extra (``fastembed`` + ``sqlite-vec``) is installed,
+``search`` blends lexical scores with local vector similarity to improve recall
+on synonyms, paraphrases, and multilingual queries.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .naming import QUESTION_WORDS, normalize_text, tokens, trigram_similarity
+from .semantic import blend_ontology_score
 
 KINDS = ("term", "attribute", "sql_attribute", "glossary", "table", "example", "source")
 
@@ -161,14 +163,46 @@ def build_docs(
     return docs
 
 
-def search(query: str, docs: list[Doc], kinds: list[str] | None = None, limit: int = 10, min_score: float = 0.2) -> list[dict[str, Any]]:
+def doc_text(doc: Doc, max_chars: int = 2000) -> str:
+    """Canonical text representation of a Doc for local vector indexing."""
+    parts: list[str] = []
+    seen: set[str] = set()
+    for raw in (doc.title, *(text for text, _ in doc.fields)):
+        cleaned = (raw or "").strip()
+        if not cleaned:
+            continue
+        key = cleaned.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        parts.append(cleaned)
+    joined = "\n".join(parts)
+    return joined[:max_chars] if len(joined) > max_chars else joined
+
+
+def search(
+    query: str,
+    docs: list[Doc],
+    kinds: list[str] | None = None,
+    limit: int = 10,
+    min_score: float = 0.2,
+    *,
+    semantic_scores: dict[tuple[str, str], float] | None = None,
+    min_semantic: float = 0.52,
+) -> list[dict[str, Any]]:
     wanted = set(kinds or KINDS)
     hits = []
     for doc in docs:
         if doc.kind not in wanted:
             continue
-        s = score(query, doc)
+        lex = score(query, doc)
+        sem = semantic_scores.get((doc.kind, doc.id)) if semantic_scores is not None else None
+        s = blend_ontology_score(lex, sem, min_semantic=min_semantic) if semantic_scores is not None else lex
         if s >= min_score:
-            hits.append({**doc.payload, "kind": doc.kind, "id": doc.id, "name": doc.title, "score": s})
+            hit: dict[str, Any] = {**doc.payload, "kind": doc.kind, "id": doc.id, "name": doc.title, "score": s}
+            if sem is not None and sem >= min_semantic:
+                hit["semantic_score"] = round(sem, 4)
+                hit["match"] = "semantic" if lex < min_score else "hybrid"
+            hits.append(hit)
     hits.sort(key=lambda h: (-h["score"], {"term": 0, "sql_attribute": 1, "attribute": 2, "glossary": 3, "example": 4, "source": 5, "table": 6}[h["kind"]]))
     return hits[:limit]

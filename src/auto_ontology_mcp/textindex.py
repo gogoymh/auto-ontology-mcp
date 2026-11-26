@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from .errors import KnowledgeError
 from .naming import clean_label
+from .semantic import DEFAULT_MIN_SIMILARITY, VectorHit, rrf_fuse
 from .store import new_id, now
 from .vault import wikilink
 
@@ -359,8 +360,12 @@ class TextIndex:
     def __init__(self, knowledge: "Knowledge") -> None:
         self.k = knowledge
         self.store = knowledge.store
+        self.vectors = knowledge.svc.vectors
         self._ready: str | None = None
         self._fts: bool | None = None
+
+    def semantic_available(self) -> bool:
+        return self.vectors.is_available()
 
     # ------------------------------------------------------------ schema
     def fts_available(self) -> bool:
@@ -459,6 +464,35 @@ class TextIndex:
                 return
             self._sync_mirror(con, ds)
             con.execute(f"PRAGMA user_version = {seq}")
+        if self.vectors.is_available():
+            self.sync_vectors()
+
+    def sync_vectors(self) -> dict[str, dict[str, int]]:
+        """Incrementally sync passages, mirrored Terms and sources into the local vector index."""
+        if not self.vectors.is_available() or not self.k.path.exists():
+            return {}
+        with self.k._write() as con:
+            passages = {
+                str(r["id"]): (f"{r['heading']}\n{r['text']}" if r["heading"] else r["text"])
+                for r in con.execute(f"SELECT id, heading, text FROM {PASSAGES}")
+            }
+            terms = {
+                str(r["id"]): "\n".join(
+                    part for part in (r["name"], r["synonyms"], r["description"], (r["body"] or "")[:4000]) if part
+                )
+                for r in con.execute(f"SELECT id, name, synonyms, description, body FROM {TERMS}")
+            }
+            sources = {
+                str(r["id"]): "\n".join(
+                    part for part in (r["title"], r["summary"], (r["content"] or "")[:4000]) if part
+                )
+                for r in con.execute("SELECT id, title, summary, content FROM sources")
+            }
+        return {
+            "passage": self.vectors.sync_items("knowledge", "passage", passages),
+            "term": self.vectors.sync_items("knowledge", "term", terms),
+            "source": self.vectors.sync_items("knowledge", "source", sources),
+        }
 
     def _sync_mirror(self, con: sqlite3.Connection, ds: dict[str, Any]) -> None:
         from .knowledge import is_builtin  # noqa: PLC0415 (circular import)
@@ -694,14 +728,28 @@ class TextIndex:
 
     # ------------------------------------------------------------ search
     def search(
-        self, query: str, kinds: list[str] | None = None, limit: int = 10, source: int | None = None, term: str | None = None
+        self,
+        query: str,
+        kinds: list[str] | None = None,
+        limit: int = 10,
+        source: int | None = None,
+        term: str | None = None,
+        *,
+        min_similarity: float = DEFAULT_MIN_SIMILARITY,
     ) -> dict[str, Any]:
         ds = self.k.ds(create=False)
         words = query_words(query)
         if not words:
             raise KnowledgeError("Give words to search for.")
+        semantic_on = self.vectors.is_available()
         if ds is None or not self.k.path.exists():
-            return {"query": query, "words": words, "hits": [], "hint": "The knowledge store is empty."}
+            return {
+                "query": query,
+                "words": words,
+                "hits": [],
+                "search_mode": "hybrid" if semantic_on else "lexical",
+                "hint": "The knowledge store is empty.",
+            }
         self.sync()
         wanted = [x for x in (kinds or SEARCH_KINDS) if x in SEARCH_KINDS] or list(SEARCH_KINDS)
         limit = max(1, min(int(limit or 10), 50))
@@ -712,17 +760,39 @@ class TextIndex:
                 raise KnowledgeError(f"No Term named {term!r}.")
             term_id = t["id"]
         mode = "all words"
+        fetch_limit = max(limit * 3, 25) if semantic_on else limit
         with self.k._write() as con:
-            hits = self._search(con, words, wanted, limit, source, term_id, any_word=False)
+            hits = self._search(con, words, wanted, fetch_limit, source, term_id, any_word=False)
             if not hits and len(words) > 1:
-                hits = self._search(con, words, wanted, limit, source, term_id, any_word=True)
+                hits = self._search(con, words, wanted, fetch_limit, source, term_id, any_word=True)
                 mode = "any word"
-        hits.sort(key=lambda h: -h["score"])
+
+        if semantic_on:
+            self.sync_vectors()
+            vec_kinds = [
+                k for k in wanted
+                if (k == "passage")
+                or (k == "term" and source is None and term_id is None)
+                or (k == "source" and term_id is None)
+            ]
+            vec_hits = (
+                self.vectors.search("knowledge", vec_kinds, query, limit=max(limit * 4, 30), min_similarity=min_similarity)
+                if vec_kinds
+                else []
+            )
+            with self.k._write() as con:
+                hits, used_semantic = self._fuse_hits(con, hits, vec_hits, words, source, term_id)
+            if used_semantic and not any(h["match"] != "semantic" for h in hits):
+                mode = "semantic"
+        else:
+            hits.sort(key=lambda h: -h["score"])
+
         fq = fts_query(words, any_word=mode == "any word")
         out: dict[str, Any] = {
             "query": query,
             "words": words,
             "matched": mode,
+            "search_mode": "hybrid" if semantic_on else "lexical",
             "hits": hits[:limit],
             "fts_query": fq,
             "sql_example": (
@@ -732,8 +802,155 @@ class TextIndex:
             ),
         }
         if not hits:
-            out["hint"] = "Nothing matched. Try the words as written in the source, a synonym or a translation."
+            out["hint"] = (
+                "Nothing matched lexically or semantically. Try other words, a synonym or a translation."
+                if semantic_on
+                else "Nothing matched. Try the words as written in the source, a synonym or a translation."
+            )
         return out
+
+    @staticmethod
+    def _hit_key(hit: dict[str, Any]) -> str:
+        kind = hit["kind"]
+        if kind == "passage":
+            return f"passage:{hit['passage_id']}"
+        if kind == "term":
+            return f"term:{hit['term_id']}"
+        return f"source:{hit['source_id']}"
+
+    def _hydrate_semantic_hits(
+        self,
+        con: sqlite3.Connection,
+        vec_hits: list[VectorHit],
+        words: list[str],
+        source: int | None,
+        term_id: str | None,
+    ) -> list[tuple[str, float, dict[str, Any]]]:
+        """Filter vector hits by source/term constraints and load full hit payloads."""
+        out: list[tuple[str, float, dict[str, Any]]] = []
+        by_kind: dict[str, list[VectorHit]] = {}
+        for vh in vec_hits:
+            by_kind.setdefault(vh.kind, []).append(vh)
+
+        passage_rows: dict[str, sqlite3.Row] = {}
+        if "passage" in by_kind:
+            pids = [int(h.item_id) for h in by_kind["passage"] if str(h.item_id).isdigit()]
+            if pids:
+                marks = ",".join("?" for _ in pids)
+                filters = [f"p.id IN ({marks})"]
+                fparams: list[Any] = [*pids]
+                if source is not None:
+                    filters.append("p.source_id = ?")
+                    fparams.append(int(source))
+                if term_id is not None:
+                    filters.append(f"p.id IN (SELECT passage_id FROM {PASSAGE_TERMS} WHERE term_id = ?)")
+                    fparams.append(term_id)
+                rows = con.execute(
+                    f"""
+                    SELECT p.id, p.source_id, p.kind, p.heading, p.locator, p.text, s.title, s.original,
+                           (SELECT group_concat(t.name, ', ') FROM {PASSAGE_TERMS} pt JOIN {TERMS} t ON t.id = pt.term_id WHERE pt.passage_id = p.id) AS term_names
+                    FROM {PASSAGES} p JOIN sources s ON s.id = p.source_id
+                    WHERE {' AND '.join(filters)}
+                    """,
+                    fparams,
+                ).fetchall()
+                passage_rows = {str(r["id"]): r for r in rows}
+
+        term_rows: dict[str, sqlite3.Row] = {}
+        if "term" in by_kind and source is None and term_id is None:
+            tids = [h.item_id for h in by_kind["term"]]
+            if tids:
+                marks = ",".join("?" for _ in tids)
+                rows = con.execute(
+                    f"SELECT id, name, kind, status, description, body FROM {TERMS} WHERE id IN ({marks})",
+                    tids,
+                ).fetchall()
+                term_rows = {str(r["id"]): r for r in rows}
+
+        source_rows: dict[str, sqlite3.Row] = {}
+        if "source" in by_kind and term_id is None:
+            sids = [int(h.item_id) for h in by_kind["source"] if str(h.item_id).isdigit()]
+            if source is not None:
+                sids = [s for s in sids if s == int(source)]
+            if sids:
+                marks = ",".join("?" for _ in sids)
+                rows = con.execute(
+                    f"SELECT id, title, kind, original, summary, content FROM sources WHERE id IN ({marks})",
+                    sids,
+                ).fetchall()
+                source_rows = {str(r["id"]): r for r in rows}
+
+        for vh in vec_hits:
+            key = f"{vh.kind}:{vh.item_id}"
+            if vh.kind == "passage":
+                r = passage_rows.get(vh.item_id)
+                if r is None:
+                    continue
+                payload = self._passage_hit(r, _snippet(r["text"], words), vh.similarity, "semantic")
+            elif vh.kind == "term":
+                r = term_rows.get(vh.item_id)
+                if r is None:
+                    continue
+                text = " ".join(x for x in (r["description"], r["body"]) if x) or r["name"]
+                payload = self._term_hit(r, _snippet(text, words), vh.similarity, "semantic")
+            elif vh.kind == "source":
+                r = source_rows.get(vh.item_id)
+                if r is None:
+                    continue
+                text = " ".join(x for x in (r["summary"], r["content"]) if x) or r["title"]
+                payload = self._source_hit(r, _snippet(text, words), vh.similarity, "semantic")
+            else:
+                continue
+            out.append((key, vh.similarity, payload))
+        return out
+
+    def _fuse_hits(
+        self,
+        con: sqlite3.Connection,
+        lex_hits: list[dict[str, Any]],
+        vec_hits: list[VectorHit],
+        words: list[str],
+        source: int | None,
+        term_id: str | None,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Fuse lexical FTS5/LIKE hits and vector hits via Reciprocal Rank Fusion."""
+        hydrated = self._hydrate_semantic_hits(con, vec_hits, words, source, term_id)
+        if not hydrated:
+            lex_hits.sort(key=lambda h: -h["score"])
+            return lex_hits, False
+
+        lex_sorted = sorted(lex_hits, key=lambda h: (-h["score"], 0 if h["match"] == "words" else 1))
+        lex_ranked: list[tuple[str, float]] = []
+        lex_weights: dict[str, float] = {}
+        by_key: dict[str, dict[str, Any]] = {}
+        for hit in lex_sorted:
+            key = self._hit_key(hit)
+            if key in by_key:
+                continue
+            by_key[key] = dict(hit)
+            lex_ranked.append((key, float(hit["score"])))
+            lex_weights[key] = 1.0 if hit["match"] == "words" else 0.5
+
+        sem_ranked: list[tuple[str, float]] = []
+        sem_scores: dict[str, float] = {}
+        for key, sim, payload in hydrated:
+            if key in sem_scores:
+                continue
+            sem_scores[key] = sim
+            sem_ranked.append((key, sim))
+            if key not in by_key:
+                by_key[key] = payload
+
+        fused_scores = rrf_fuse(lex_ranked, sem_ranked, lexical_weights=lex_weights)
+        merged: list[dict[str, Any]] = []
+        for key, score in fused_scores.items():
+            item = by_key[key]
+            item["score"] = score
+            if key in sem_scores:
+                item["semantic_score"] = round(sem_scores[key], 4)
+            merged.append(item)
+        merged.sort(key=lambda h: (-h["score"], -h.get("semantic_score", 0.0)))
+        return merged, True
 
     def _search(self, con, words, kinds, limit, source, term_id, any_word: bool) -> list[dict[str, Any]]:
         fts = self.fts_available()
