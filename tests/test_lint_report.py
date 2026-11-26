@@ -27,7 +27,8 @@ def _examples(label: str) -> list[tuple[str, str]]:
         start = SKILL.index(tag)
         end = SKILL.find("\n## ", start)
         sec = SKILL[start : end if end > 0 else len(SKILL)]
-        out += [(kind, ex) for ex in re.findall(label + r":\n((?:> .*\n?)+)", sec)]
+        # the lint skips blockquotes, so lint the example's text without its '> ' markers
+        out += [(kind, re.sub(r"^> ?", "", ex, flags=re.M)) for ex in re.findall(label + r":\n((?:> .*\n?)+)", sec)]
     assert out, f"no '{label}' examples in the skill"
     return out
 
@@ -205,3 +206,51 @@ def test_crammed_without_parens_flagged(text: str) -> None:
 def test_crammed_without_parens_pass(text: str) -> None:
     code, kinds = _kinds(text)
     assert "crammed" not in kinds, (text, kinds)
+
+
+# AOM-29: wording the writer quotes (quotes, code blocks, blockquotes) is not their own, so it is not checked.
+@pytest.mark.parametrize(
+    "text",
+    [
+        "'향후'를 '앞으로'로 고칩니다.",
+        '"정확히 부합합니다"를 지웠습니다. 이제 린트가 이 말을 잡습니다.',
+        "“미설치 환경”을 풀어 썼습니다.",
+        "‘명확한 작업’ 같은 평가어를 지웠습니다.",
+        "「해당 스크립트」를 '이 스크립트'로 바꿉니다.",
+        "사용자가 쓴 말은 이렇습니다.\n> 향후 배포 시 해당 기능을 연동합니다.\n이 문장을 고칩니다.",
+        "로그는 이렇습니다.\n```\nI reviewed both new PRs and found nothing.\n미설치 상태에서 실행되었고 실패했으며 종료\n```\n다시 실행해 고쳤습니다.",
+        "출력입니다.\n~~~text\n해당 파일을 수행합니다.\n~~~\n이제 통과합니다.",
+    ],
+)
+def test_quoted_text_is_skipped(text: str) -> None:
+    code, kinds = _kinds(text)
+    assert code == 0, (text, kinds)
+
+
+@pytest.mark.parametrize(
+    ("text", "kind"),
+    [
+        ("'향후'를 고쳤고 향후 배포도 고칩니다.", "nounstack"),
+        ("인용 밖의 해당 스크립트를 고칩니다.\n> 향후 고칩니다.", "translationese"),
+        ("```\n코드\n```\n해당 스크립트를 고칩니다.", "translationese"),
+        ("I don't think the 'fix' works well here.", "english"),
+        ("리뷰를 마쳤습니다.\n> #28은 병합해도 됩니다.", "empty"),
+        ("`a.py`, `b.py`, `c.py`에 테스트 5개를 더했습니다.", "crammed"),
+    ],
+)
+def test_text_outside_quotes_is_still_checked(text: str, kind: str) -> None:
+    code, kinds = _kinds(text)
+    assert code == 1 and kind in kinds, (text, kinds)
+
+
+def test_skill_documents_quote_exclusion() -> None:
+    start = SKILL.index("### 점검하지 않는 곳")
+    sec = SKILL[start : SKILL.find("\n## ", start) if SKILL.find("\n## ", start) > 0 else len(SKILL)]
+    for word in ("따옴표", "코드 블록", "인용문"):
+        assert word in sec, word
+    before = re.findall(r"고치기 전:\n((?:> .*\n?)+)", sec)
+    after = re.findall(r"고친 뒤:\n((?:> .*\n?)+)", sec)
+    assert before and len(before) == len(after)
+    for b, a in zip(before, after):
+        assert _run(re.sub(r"^> ?", "", b, flags=re.M)).returncode == 1, b
+        assert _run(re.sub(r"^> ?", "", a, flags=re.M)).returncode == 0, a

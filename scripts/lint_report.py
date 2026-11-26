@@ -79,6 +79,25 @@ def sentences(text: str) -> list[str]:
     return [p.strip() for p in out if p.strip()]
 
 
+# Text the writer quotes is not their own wording, so the lint skips it:
+# fenced code blocks, blockquote lines (>) and spans in quotes. Inline code stays (crammed counts its paths).
+_FENCE = re.compile(r"^[ \t]*(```|~~~)[^\n]*\n.*?(?:^[ \t]*\1[^\n]*$|\Z)", re.M | re.S)
+_QUOTE_LINE = re.compile(r"^[ \t]*>.*$", re.M)
+# inline code first so quote marks inside it are kept; ' opens only after a non-letter (not don't)
+_QUOTED = re.compile(
+    r"(`[^`\n]*`)"
+    r"|\"[^\"\n]+\"|“[^”\n]+”|‘[^’\n]+’|「[^」\n]+」|『[^』\n]+』"
+    r"|(?<![A-Za-z0-9])'[^'\n]+'(?![A-Za-z0-9])"
+)
+
+
+def mask(text: str) -> str:
+    """Drop code blocks and blockquote lines, and blank quoted spans to '…'."""
+    text = _FENCE.sub("", text)
+    text = _QUOTE_LINE.sub("", text)
+    return _QUOTED.sub(lambda m: m.group(1) or "'…'", text)
+
+
 def has_quantity(s: str) -> bool:
     """True when s holds a number outside file names, ticket ids and versions."""
     rest = _ID.sub("", re.sub(FILE, "", s))
@@ -94,6 +113,7 @@ def empty_report(text: str) -> bool:
 def lint(text: str) -> list[tuple[str, str]]:
     """Return (pattern id, excerpt) for every finding in text."""
     found: list[tuple[str, str]] = []
+    text = mask(text)
     parts = sentences(text)
     if empty_report(text):
         found.append(("empty", parts[0][:60]))
