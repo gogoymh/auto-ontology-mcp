@@ -15,12 +15,24 @@ TRANSLATIONESE = [
     r"통과(를|함을) 확인했", r"이를 통해", r"해당 ", r"가 아니라 .*입니다",
 ]
 NOMINAL = [r"구축", r"연동", r"등록되었"]
-NOUNSTACK = [r"향후", r"(?<![가-힣])미(할당|설치|적용|반영|처리|확인)", r"비활성화", r"(병합|실행|설치|호출|배포) 시(?![가-힣])", r"기존 "]
-SELFRATE = [r"명확한", r"완결할 수 있", r"바로 마무리"]
-# a whole report that only says a ticket or task is done
-EMPTY = r"(?:[A-Z]+-\d+|작업|미션)\S*(?:\s+\S+[을를])?\s*(?:마쳤|끝났|끝냈|완료했)습니다\.?"
-CONNECTORS = r"(상태에서|되었고|되었으며|했으며|반면|하므로|이므로|되어)"  # heavy joins; plain 하고/이고 stay allowed
-FILE = r"[\w./-]+\.(py|json|toml|md|ts|tsx|rs|yml|yaml|sql)\b"
+# 시 after a noun of two or more syllables (검토 시, 배포 시). Not 3시, 시간, 다시, 표시.
+NOUNSTACK = [
+    r"향후",
+    r"(?<![가-힣])미(할당|설치|적용|반영|처리|확인)",
+    r"비활성화",
+    r"[가-힣]{2,} 시(?![가-힣])",
+    r"(?<![가-힣])기존",
+]
+# 불명확한 names the subject, so 명확한 must not match inside it
+SELFRATE = [r"(?<![가-힣])명확한", r"완결할 수 있", r"바로 마무리"]
+# a sentence that only announces completion; a result in that same sentence is not an empty report
+_DONE = re.compile(r"(?:마쳤|끝났|끝냈|완료했)습니다\.?$")
+_RESULT = re.compile(r"\d+\.\d+|\d+점|올리|올라|올랐|올렸|내리|내려|줄었|줄어|늘었|늘어|고쳤|고쳐|통과")
+# three or more paths plus a number and one of these verbs, even with no parentheses
+_CRAM_ACT = re.compile(r"추가|구현|저장|수행|넣었|고쳤")
+CONNECTORS = r"(상태에서|되었고|되었으며|했으며|반면|하므로|이므로)"  # 되어/하고/이고 stay allowed
+# \b misses a path glued to a Korean particle (tasks.json과). Stop at an ASCII word char instead.
+FILE = r"[\w./-]+\.(py|json|toml|md|ts|tsx|rs|yml|yaml|sql)(?![A-Za-z0-9_])"
 HINTS = {
     "translationese": "번역투: 짧은 동사로 고친다 (패턴 1)",
     "nominal": "명사형 동사: '만들다', '잇다', '올라왔다'로 고친다 (함께 지킬 것)",
@@ -44,13 +56,19 @@ def sentences(text: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
+def empty_report(text: str) -> bool:
+    """True when every sentence only says that something finished."""
+    parts = sentences(text)
+    return bool(parts) and all(_DONE.search(part) and not _RESULT.search(part) for part in parts)
+
+
 def lint(text: str) -> list[tuple[str, str]]:
     """Return (pattern id, excerpt) for every finding in text."""
     found: list[tuple[str, str]] = []
-    whole = re.sub(r"^\s*>\s?", "", text, flags=re.M).strip()
-    if re.fullmatch(EMPTY, whole):
-        found.append(("empty", whole[:60]))
-    for s in sentences(text):
+    parts = sentences(text)
+    if empty_report(text):
+        found.append(("empty", parts[0][:60]))
+    for s in parts:
         plain = re.sub(r"`[^`]*`", "", s)
         for rx in TRANSLATIONESE:
             m = re.search(rx, plain)
@@ -64,7 +82,9 @@ def lint(text: str) -> list[tuple[str, str]]:
         if "·" in plain:
             found.append(("middot", plain[max(0, plain.find("·") - 6) : plain.find("·") + 6]))
         parens = re.findall(r"\(([^)]*)\)", s)
-        if len(parens) >= 3 or (len(parens) >= 2 and any(re.search(FILE, p) for p in parens)):
+        paren_hit = len(parens) >= 3 or (len(parens) >= 2 and any(re.search(FILE, p) for p in parens))
+        file_hit = len(re.findall(FILE, s)) >= 3 and re.search(r"\d", s) and _CRAM_ACT.search(s)
+        if paren_hit or file_hit:
             found.append(("crammed", s[:60]))
         if not re.search(r"[가-힣]", s) and len(re.findall(r"\b[A-Za-z]{2,}\b", plain)) >= 3:
             found.append(("english", s[:60]))

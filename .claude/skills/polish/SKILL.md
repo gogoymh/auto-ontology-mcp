@@ -1,11 +1,13 @@
 ---
 name: polish
-description: Rewrite text an agent wrote for people (channel messages, mission reasons, completion reports, issue comments, docs, UI copy) so it reads like a person wrote it, without changing its meaning. Use before posting any Korean message or report (run the pre-report check in this skill before mission_finish, issue review comments and channel posts), and when reviewing agent text for translationese, crammed lists, English reports in Korean channels, or long chained sentences.
+description: Rewrite text an agent wrote for people (channel messages, mission reasons, completion reports, issue comments, docs, UI copy) so it reads like a person wrote it, without changing its meaning. Use before posting any Korean message or report (run the pre-report check in this skill before mission_finish, issue review comments and channel posts), and when reviewing agent text for translationese, crammed lists, English reports in Korean channels, long chained sentences, noun stacks, self-ratings, or reports that only say the work finished. Keep the numbered patterns between five and seven.
 ---
 
 # polish
 
 에이전트가 쓴 글을 사람이 쓴 말처럼 고친다. 뜻, 수치, 코드 식별자, 파일 이름, 티켓 번호는 그대로 둔다. 바꾸는 것은 문장 모양뿐이다.
+
+번호 패턴은 일곱 개다. 새 말버릇이 보여도 여덟 번째로 나누지 않고 아래 패턴에 넣는다.
 
 ## 쓰는 순서
 
@@ -41,7 +43,7 @@ description: Rewrite text an agent wrote for people (channel messages, mission r
 
 ## 패턴 2. 파일명과 수치를 한 문장에 몰아 넣는 나열 (crammed list)
 
-한 문장에 파일 경로, 괄호 설명, 개수, 점수가 다 들어가면 독자는 무엇이 달라졌는지 못 찾는다. 사용자가 얻는 동작을 먼저 한 문장으로 쓰고, 근거 수치는 다음 문장에, 파일 이름은 꼭 필요할 때만 마지막에 모은다. 괄호 안에 또 설명을 넣지 않는다.
+한 문장에 파일 경로, 괄호 설명, 개수, 점수가 다 들어가면 독자는 무엇이 달라졌는지 못 찾는다. 사용자가 얻는 동작을 먼저 한 문장으로 쓰고, 근거 수치는 다음 문장에, 파일 이름은 꼭 필요할 때만 마지막에 모은다. 괄호 안에 또 설명을 넣지 않는다. 괄호가 없어도 같다. 파일 경로가 셋 이상이고 수치와 저장하거나 추가하는 말이 한 문장에 있으면 나열이다.
 
 고치기 전:
 > 내장 데모 DB와 지식 베이스를 대상으로 76개 고정 과제 셋(benchmarks/tasks.json)과 헤드리스 측정 및 비교 스크립트(benchmarks/run_benchmark.py)를 추가했습니다. 5개 핵심 영역 초기 기준선(benchmarks/baseline.json, 종합 점수 1.0000)을 저장했고 ruff 린트와 tests/test_benchmark.py 4개 테스트 통과를 확인했습니다.
@@ -73,7 +75,7 @@ description: Rewrite text an agent wrote for people (channel messages, mission r
 
 ## 패턴 4. '~한 상태에서 ~되었고'처럼 길게 이어지는 문장 (chained sentence)
 
-'~한 상태에서', '~되었고', '~한 반면', '~하므로'로 사실 서너 개를 한 문장에 이으면 주어가 중간에 바뀌고 결론이 맨 끝에 묻힌다. 사실 하나에 한 문장을 쓰고, 결론(그래서 무엇을 하는지)을 앞이나 끝에 따로 둔다. 원인과 결과처럼 붙어 있어야 뜻이 사는 것만 한 문장으로 잇는다.
+'~한 상태에서', '~되었고', '~한 반면', '~하므로'로 사실 서너 개를 한 문장에 이으면 주어가 중간에 바뀌고 결론이 맨 끝에 묻힌다. 사실 하나에 한 문장을 쓰고, 결론(그래서 무엇을 하는지)을 앞이나 끝에 따로 둔다. 원인과 결과처럼 붙어 있어야 뜻이 사는 것만 한 문장으로 잇는다. `되어 있고`가 두 번 있는 것은 사실을 서너 개 잇는 문장이 아니다.
 
 고치기 전:
 > AOM-13으로 구축한 벤치마크 스크립트와 기준선이 preconquer-gogoymh에 병합된 상태에서 새 이슈 AOM-15(CI에 벤치마크 기준선 비교 단계 추가)가 미할당으로 등록되었고, 벤치마크 자동 실행·기준선 비교 연동은 @benchmark의 역할에 정확히 부합합니다.
@@ -89,7 +91,7 @@ description: Rewrite text an agent wrote for people (channel messages, mission r
 
 ## 패턴 5. 한자어 명사로 뭉친 조건과 시점 (noun stack)
 
-'향후', '~ 시', '미설치', '미할당', '비활성화', '기존'처럼 한자어 명사로 조건과 시점을 접으면 문서 투가 되고, 무엇이 어떤 상태일 때인지 다시 풀어 읽어야 한다. 동사로 풀어 '앞으로', '~할 때', '설치하지 않으면', '맡은 사람이 없다', '지금'으로 쓴다.
+'향후', '~ 시', '미설치', '미할당', '비활성화', '기존'처럼 한자어 명사로 조건과 시점을 접으면 문서 투가 되고, 무엇이 어떤 상태일 때인지 다시 풀어 읽어야 한다. 동사로 풀어 '앞으로', '~할 때', '설치하지 않으면', '맡은 사람이 없다', '지금'으로 쓴다. `기존으로`처럼 조사가 바로 붙어도 같다. `검토 시`, `배포 시`처럼 명사 뒤의 `시`는 동사로 푼다. `3시`, `시간`, `다시`, `표시`는 시각이나 다른 말이라 그대로 둔다.
 
 고치기 전:
 > 미설치 또는 비활성화 환경에서는 기존 어휘 검색과 FTS5 검색이 그대로 동작합니다.
@@ -103,9 +105,21 @@ description: Rewrite text an agent wrote for people (channel messages, mission r
 고친 뒤:
 > 앞으로 코드를 병합할 때마다 점수가 직전 결과보다 나아졌는지 보려고 기준 벤치마크부터 만듭니다.
 
+고치기 전:
+> 기존으로 동작합니다.
+
+고친 뒤:
+> 지금처럼 동작합니다.
+
+고치기 전:
+> 검토 시 기준선을 봅니다.
+
+고친 뒤:
+> 검토할 때 기준선을 봅니다.
+
 ## 패턴 6. 스스로 매기는 평가 (self-rating)
 
-맡는 이유나 결과를 쓰면서 '명확한 작업', '완결할 수 있는', '바로 마무리해'처럼 스스로 점수를 매기는 말이다. 독자가 확인할 수 없는 판단이라 근거가 되지 못한다. 평가어를 지우고, 그렇게 판단한 사실(사용자 결정이 필요 없다, 코드만 바꾸면 된다)을 쓴다.
+맡는 이유나 결과를 쓰면서 '명확한 작업', '완결할 수 있는', '바로 마무리해'처럼 스스로 점수를 매기는 말이다. 독자가 확인할 수 없는 판단이라 근거가 되지 못한다. 평가어를 지우고, 그렇게 판단한 사실(사용자 결정이 필요 없다, 코드만 바꾸면 된다)을 쓴다. `불명확한`처럼 대상이 흐리다고 말하는 것은 스스로 매긴 평가가 아니다.
 
 고치기 전:
 > 코드베이스 안에서 완결할 수 있는 명확한 작업이며, 방금 병합된 하이브리드 검색 기능의 재현율과 지연 시간을 수치로 검증할 수 있습니다.
@@ -121,7 +135,7 @@ description: Rewrite text an agent wrote for people (channel messages, mission r
 
 ## 패턴 7. 결과 없이 끝났다고만 쓴 보고 (empty report)
 
-'AOM-17은 끝났습니다', 'AOM-19 채점을 마쳤습니다'처럼 끝났다는 말만 있는 보고다. 채널과 리뷰 댓글을 읽는 사람은 무엇이 달라졌는지 다시 찾아야 한다. 끝났다는 말 뒤에 결과 한 문장을 붙인다. 붙일 결과는 같은 일의 완료 보고나 커밋에서 가져오고, 없던 내용을 만들지 않는다.
+'AOM-17은 끝났습니다', 'AOM-19 채점을 마쳤습니다'처럼 끝났다는 말만 있는 보고다. 채널과 리뷰 댓글을 읽는 사람은 무엇이 달라졌는지 다시 찾아야 한다. 끝났다는 말 뒤에 결과 한 문장을 붙인다. 붙일 결과는 같은 일의 완료 보고나 커밋에서 가져오고, 없던 내용을 만들지 않는다. 티켓 번호로 시작하지 않아도 같다. `리뷰를 마쳤습니다`, `방금 작업을 마쳤습니다`처럼 끝났다는 문장뿐이면 빈 보고다. 같은 글에 결과 문장이 있거나, 끝난다는 문장 안에 점수나 달라진 점이 있으면 빈 보고가 아니다.
 
 고치기 전:
 > AOM-17은 끝났습니다.
@@ -134,6 +148,18 @@ description: Rewrite text an agent wrote for people (channel messages, mission r
 
 고친 뒤:
 > AOM-19 채점을 마쳤습니다. AOM-5는 68점, AOM-17은 86점이고, 후속으로 AOM-23과 AOM-24를 만들었습니다.
+
+고치기 전:
+> 방금 작업을 마쳤습니다.
+
+고친 뒤:
+> 방금 작업을 마쳤습니다. 벤치마크 4개가 통과합니다.
+
+고치기 전:
+> 리뷰를 마쳤습니다.
+
+고친 뒤:
+> 리뷰를 마쳤습니다. #28은 병합해도 됩니다.
 
 ## 함께 지킬 것
 
@@ -157,11 +183,11 @@ description: Rewrite text an agent wrote for people (channel messages, mission r
 점검 목록:
 
 - [ ] 번역투: '부합합니다', '~을 대상으로', '수행', '~하도록 구현했습니다', '이를 통해', '해당'이 없다. (패턴 1)
-- [ ] 나열: 첫 문장이 사용자가 얻는 동작이고, 한 문장에 괄호 속 파일 이름이나 수치를 몰아 넣지 않았다. (패턴 2)
+- [ ] 나열: 첫 문장이 사용자가 얻는 동작이고, 한 문장에 괄호 속 파일 이름이나 수치를 몰아 넣지 않았다. 괄호 없이 파일 경로 셋과 수치를 넣은 문장도 없다. (패턴 2)
 - [ ] 언어: 채널이 한국어면 문장이 한국어다. 식별자, 명령, 지표 이름만 원문으로 둔다. (패턴 3)
-- [ ] 긴 문장: '~한 상태에서', '~되었고', '~한 반면'으로 사실 서너 개를 잇지 않았다. (패턴 4)
-- [ ] 한자어 명사: '향후', '~ 시', '미설치', '비활성화', '기존'을 동사로 풀었다. (패턴 5)
-- [ ] 평가어: '명확한', '완결할 수 있는'을 지우고 근거 사실을 썼다. (패턴 6)
-- [ ] 빈 보고: 끝났다는 말 뒤에 결과 한 문장이 있다. (패턴 7)
+- [ ] 긴 문장: '~한 상태에서', '~되었고', '~한 반면'으로 사실 서너 개를 잇지 않았다. `되어 있고`는 그대로 둔다. (패턴 4)
+- [ ] 한자어 명사: '향후', '~ 시', '미설치', '비활성화', '기존'을 동사로 풀었다. '시간'과 '3시'는 그대로 둔다. (패턴 5)
+- [ ] 평가어: '명확한', '완결할 수 있는'을 지우고 근거 사실을 썼다. '불명확한'은 그대로 둔다. (패턴 6)
+- [ ] 빈 보고: 끝났다는 말 뒤에 결과 한 문장이 있다. 티켓 번호가 없어도 같다. (패턴 7)
 - [ ] 가운뎃점과 명사형 동사('구축', '연동')를 쓰지 않았다. (함께 지킬 것)
 - [ ] 수치, 이름, 번호가 고치기 전과 같고, 없던 판단을 더하지 않았다.
