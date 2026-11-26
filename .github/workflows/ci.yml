@@ -18,8 +18,25 @@ jobs:
           --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s --health-retries 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --extra postgres --extra duckdb
       - run: uv run pytest -q
         env:
           AO_TEST_PG_URL: postgresql+psycopg://postgres:pw@127.0.0.1:5432/postgres
+      - name: Cache fastembed model
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/fastembed-cache
+          key: ${{ runner.os }}-fastembed-paraphrase-multilingual-MiniLM-L12-v2-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-fastembed-paraphrase-multilingual-MiniLM-L12-v2-
+      - name: Install semantic extra
+        run: uv sync --extra semantic
+      - name: Run semantic tests
+        run: uv run pytest -q tests/test_semantic_search.py tests/test_benchmark_semantic_model.py
+        env:
+          AUTO_ONTOLOGY_EMBEDDING_CACHE: ${{ runner.temp }}/fastembed-cache
+          FASTEMBED_CACHE_PATH: ${{ runner.temp }}/fastembed-cache
