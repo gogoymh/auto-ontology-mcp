@@ -376,7 +376,7 @@ You can also give the model a URL and let it call `add_datasource`. Any SQLAlche
 | DuckDB | `duckdb:////absolute/path/file.duckdb` | `duckdb-engine` |
 | Oracle | `oracle+oracledb://user:pass@host:1521/?service_name=ORCLPDB1` | `oracledb` |
 
-From a clone, `uv sync --extra postgres` (or `mysql`, `duckdb`, `oracle`, `all`) installs the same drivers.
+From a clone, `uv sync --extra postgres` (or `mysql`, `duckdb`, `oracle`, `all`) installs the same drivers. For optional local hybrid semantic search (`fastembed` + `sqlite-vec`, no API key needed), install `--extra semantic` (or `uvx --with fastembed --with sqlite-vec ...`).
 
 The test suite runs against SQLite and PostgreSQL 17, and against Oracle when `AO_TEST_ORACLE_URL` is set. MySQL and DuckDB go through the same SQLAlchemy and sqlglot code paths but have not been tested against a live server yet.
 
@@ -530,7 +530,7 @@ What the structure adds on top of markdown pages:
 Limits to know about:
 
 - Generated pages are a one-way view. Edits made to them in Obsidian are not read back; change knowledge through the assistant and run `export_wiki` again (it replaces only the pages it generated and never touches originals or pages you wrote).
-- Search is lexical, not semantic: FTS5 matches words and prefixes, not meaning. Search with the words the sources use, add your own words as synonyms, and translate when the sources are in another language.
+- Search is lexical by default (FTS5 matches words and prefixes, not meaning). Install the optional `semantic` extra (`fastembed` + `sqlite-vec`) to enable local hybrid vector search for synonyms, paraphrases and multilingual queries without external API keys. Otherwise, search with the words the sources use, add your own words as synonyms, and translate when the sources are in another language.
 - The store indexes passages, not whole originals. What the model did not save as a passage or summary is in the vault but not in `search_text`.
 - Nothing watches your files or the vault. When a document changes, ask the assistant to read it again. Earlier versions of its original stay in the vault until you delete them.
 - It is a single-user store on your machine. Back it up by copying `~/.auto-ontology-mcp`.
@@ -649,6 +649,9 @@ Over HTTP, a token is required to reach the server from anywhere but localhost: 
 | `AUTO_ONTOLOGY_PROFILE_ROWS` | `1000` | Rows sampled per table while profiling |
 | `AUTO_ONTOLOGY_ALLOW_DATASOURCE_TOOLS` | `1` | `0` hides `add_datasource` and `scan_datasource` from MCP |
 | `AUTO_ONTOLOGY_TOOLSETS` | `all` | Tool groups to expose, comma-separated: `answer` (always on), `model`, `knowledge`, `share` |
+| `AUTO_ONTOLOGY_SEMANTIC` | `auto` | Optional local hybrid search (`fastembed` + `sqlite-vec`): `auto` enables when installed, `0` disables |
+| `AUTO_ONTOLOGY_EMBEDDING_MODEL` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | Local `fastembed` ONNX model used when the `semantic` extra is installed |
+| `AUTO_ONTOLOGY_EMBEDDING_CACHE` | unset | Optional cache directory for local `fastembed` model files |
 | `AUTO_ONTOLOGY_MCP_TOKEN` | unset | Token required by the HTTP transport (same as `--token`) |
 | `AUTO_ONTOLOGY_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | HTTP bind address |
 </details>
@@ -706,7 +709,7 @@ AO_TEST_ORACLE_URL="oracle+oracledb://ao:pw@127.0.0.1:1521/?service_name=FREEPDB
 | `demo.py`, `demo_knowledge.py` | The demo database and the demo documents |
 | `service.py` | Everything behind the tools |
 | `validation.py`, `sqlcheck.py`, `structure.py` | Read-only guard, column lineage, probe-based validation, checks on the parsed query |
-| `search.py`, `graph.py` | Lexical search, join paths |
+| `search.py`, `semantic.py`, `graph.py` | Lexical and optional hybrid semantic search (`fastembed` + `sqlite-vec`), join paths |
 | `guidance.py` | Rules handed to the model, adapted from Auto Ontology's prompts |
 | `server.py`, `http_auth.py`, `__main__.py` | MCP surface, HTTP token, CLI |
 

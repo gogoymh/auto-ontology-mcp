@@ -425,7 +425,7 @@ def build_server(settings: Settings | None = None, service: OntologyService | No
         term: Annotated[str | None, Field(description="Restrict results to passages linked to this Term name.")] = None,
         limit: Annotated[int, Field(ge=1, le=50, description="Maximum ranked hits to return (1-50).")] = 10,
     ) -> dict[str, Any]:
-        """Run BM25 full-text and compound-substring search across knowledge store passages, Term bodies, and sources. Use when searching inside stored prose or quotes; use search_ontology to search structured schema catalogs across any datasource, and get_source to inspect everything from one source. Strips Korean particles and falls back to any-word matching when all-word matching yields no hits. Returns ranked snippets with [matched] terms, Obsidian [[links]], fts_query, and a runnable SQL example."""
+        """Run BM25 full-text, compound-substring, and optional local hybrid vector search across knowledge store passages, Term bodies, and sources. Use when searching inside stored prose or quotes; use search_ontology to search structured schema catalogs across any datasource, and get_source to inspect everything from one source. Strips Korean particles, falls back to any-word matching, and fuses local embeddings via RRF when the semantic extra is installed. Returns ranked snippets, Obsidian [[links]], fts_query, and a SQL example."""
         return svc.knowledge.search_text(query, list(kinds) if kinds else None, limit, source, term)
 
     @tool(READ, title="Inspect a knowledge source and provenance")
@@ -472,7 +472,7 @@ def build_server(settings: Settings | None = None, service: OntologyService | No
         limit: Annotated[int, Field(ge=1, le=50, description="Maximum ranked hits to return (1-50).")] = 10,
         datasource: DatasourceArg = None,
     ) -> dict[str, Any]:
-        """Search one datasource's ontology catalog lexically across Terms, mapped columns, SQL attributes, glossary entries, verified examples, sources, unmodeled tables, and (in the knowledge store) record values and top full-text hits. Use as the primary discovery tool when you do not know exact names; use list_terms to browse all Terms, get_term for one known Term, search_text for deep knowledge-store prose search, and search only for ChatGPT connector IDs. Matching is lexical (not vector/semantic), so use schema vocabulary, synonyms, or translations."""
+        """Search one datasource's ontology catalog across Terms, mapped columns, SQL attributes, glossary entries, verified examples, sources, unmodeled tables, and (in the knowledge store) record values and top full-text hits. Use as the primary discovery tool when you do not know exact names; use list_terms to browse all Terms, get_term for one known Term, search_text for deep knowledge-store prose search, and search only for ChatGPT connector IDs. Uses lexical scoring by default and blends local embeddings when the semantic extra is installed."""
         return svc.search_ontology(query, list(kinds) if kinds else None, limit, datasource)
 
     @tool(READ, title="Get full details of one Term")

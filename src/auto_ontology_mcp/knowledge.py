@@ -1197,6 +1197,7 @@ class Knowledge:
             "passages": passages,
             "vault": str(self.vault_root),
             "full_text_search": self.index.fts_available(),
+            "semantic_search": self.index.semantic_available(),
         }
 
 
