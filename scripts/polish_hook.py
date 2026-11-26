@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Claude Code PreToolUse hook: run the polish lint on a completion report before mission_finish.
+"""Claude Code PreToolUse hook: run the polish lint on agent reports before they are posted.
 
-Reads the hook payload (JSON with tool_name and tool_input) on stdin. When the report's
-summary or next has a pattern from .claude/skills/polish/SKILL.md, it exits 2 so the call is
+Checks mission_finish (summary, next), issue_update (comment) and message_post (text).
+Reads the hook payload (JSON with tool_name and tool_input) on stdin. When one of those
+fields has a pattern from .claude/skills/polish/SKILL.md, it exits 2 so the call is
 blocked and prints, on stderr, each finding with the skill's before/after example, asking the
 agent to rewrite the text without changing its meaning. Exits 0 otherwise (fails open on bad input).
 """
@@ -16,14 +17,21 @@ SKILL = ROOT / ".claude/skills/polish/SKILL.md"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lint_report import HINTS, lint  # noqa: E402
 
-TOOLS = ("mission_finish",)  # matched by suffix: mcp__cua__mission_finish
-FIELDS = ("summary", "next")  # body and commit are English by rule
+# tool name suffix (mcp__cua__<name>) -> (fields to lint, what the text is, in the block message)
+TOOLS = {
+    "mission_finish": (("summary", "next"), "완료 보고"),  # body and commit are English by rule
+    "issue_update": (("comment",), "이슈 댓글"),
+    "message_post": (("text",), "채널 메시지"),
+}
 # finding id -> section tag in the skill whose first example the hook shows
 SECTIONS = {
     "translationese": "(translationese)",
     "crammed": "(crammed list)",
     "english": "(English report in a Korean channel)",
     "chained": "(chained sentence)",
+    "nounstack": "(noun stack)",
+    "selfrate": "(self-rating)",
+    "empty": "(empty report)",
 }
 # finding id -> phrase that picks the rule line under "함께 지킬 것"
 RULES = {"nominal": "명사형 동사", "middot": "가운뎃점"}
@@ -49,9 +57,9 @@ def example(kind: str, skill: str) -> str:
     return f"고치기 전:\n{m.group(1).rstrip()}\n고친 뒤:\n{m.group(2).rstrip()}"
 
 
-def report(findings: dict[str, list[tuple[str, str]]], skill: str) -> str:
+def report(findings: dict[str, list[tuple[str, str]]], skill: str, what: str = "완료 보고", tool: str = "mission_finish") -> str:
     lines = [
-        "완료 보고에 윤문 패턴이 남아 있어 mission_finish를 막았습니다.",
+        f"{what}에 윤문 패턴이 남아 있어 {tool}를 막았습니다.",
         "아래 예처럼 문장만 고쳐 다시 부르세요. 뜻, 수치, 파일 이름, 티켓 번호, 명령은 그대로 둡니다.",
     ]
     for field, found in findings.items():
@@ -72,15 +80,17 @@ def main() -> int:
     except (ValueError, AttributeError) as exc:
         log(f"skip: unreadable payload ({exc})")
         return 0
-    if not tool.endswith(TOOLS):
+    name = next((t for t in TOOLS if tool.endswith(t)), None)
+    if name is None or not isinstance(args, dict):
         return 0
-    findings = {f: found for f in FIELDS if isinstance(args.get(f), str) and (found := lint(args[f]))}
+    fields, what = TOOLS[name]
+    findings = {f: found for f in fields if isinstance(args.get(f), str) and (found := lint(args[f]))}
     count = sum(len(v) for v in findings.values())
-    log(f"tool={tool} fields={','.join(f for f in FIELDS if f in args)} findings={count}")
+    log(f"tool={tool} fields={','.join(f for f in fields if f in args)} findings={count}")
     if not findings:
         return 0
     skill = SKILL.read_text(encoding="utf-8") if SKILL.exists() else ""
-    print(report(findings, skill), file=sys.stderr)
+    print(report(findings, skill, what, name), file=sys.stderr)
     return 2
 
 

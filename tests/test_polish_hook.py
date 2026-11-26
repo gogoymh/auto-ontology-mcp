@@ -1,5 +1,6 @@
-"""scripts/polish_hook.py must block mission_finish reports with polish patterns and show the skill's fix."""
+"""scripts/polish_hook.py must block reports (mission_finish, issue_update comment, message_post) with polish patterns."""
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -44,8 +45,37 @@ def test_passes_clean_report() -> None:
     assert res.returncode == 0, res.stderr
 
 
+def test_blocks_review_comment() -> None:
+    res = _run("mcp__cua__issue_update", {"id": 3, "status": "review", "comment": "AOM-19 채점을 마쳤습니다."})
+    assert res.returncode == 2, res.stderr
+    assert "이슈 댓글" in res.stderr and "issue_update" in res.stderr and "[comment]" in res.stderr
+    assert "empty: " in res.stderr and "> AOM-17을 마쳤습니다. `run_benchmark.py --semantic`" in res.stderr
+
+
+def test_blocks_channel_message() -> None:
+    res = _run("mcp__cua__message_post", {"channel": "general", "text": "미설치 또는 비활성화 환경에서는 기존 검색이 동작합니다."})
+    assert res.returncode == 2, res.stderr
+    assert "채널 메시지" in res.stderr and "message_post" in res.stderr and "[text]" in res.stderr
+    assert "nounstack: '미설치'" in res.stderr and "고친 뒤:" in res.stderr
+
+
+def test_blocks_english_message() -> None:
+    res = _run("mcp__cua__message_post", {"text": "I reviewed both new PRs. #27 needs changes before it can merge."})
+    assert res.returncode == 2 and "english: " in res.stderr, res.stderr
+
+
+def test_passes_clean_comment_and_message() -> None:
+    assert _run("mcp__cua__issue_update", {"id": 3, "status": "review", "comment": CLEAN}).returncode == 0
+    assert _run("mcp__cua__message_post", {"text": CLEAN}).returncode == 0
+
+
+def test_passes_issue_update_without_comment() -> None:
+    res = _run("mcp__cua__issue_update", {"id": 3, "status": "done", "body": DIRTY, "title": "해당 스크립트 연동"})
+    assert res.returncode == 0, res.stderr
+
+
 def test_passes_other_tools_and_bad_input() -> None:
-    assert _run("mcp__cua__message_post", {"text": DIRTY}).returncode == 0
+    assert _run("mcp__cua__doc_write", {"text": DIRTY}).returncode == 0
     res = subprocess.run([sys.executable, str(HOOK)], input="not json", capture_output=True, text=True, timeout=10)
     assert res.returncode == 0, res.stderr
 
@@ -56,8 +86,10 @@ def test_every_kind_has_skill_example(kind: str) -> None:
     assert polish_hook.example(kind, skill), f"no fix example in the skill for {kind}"
 
 
-def test_settings_registers_hook() -> None:
+@pytest.mark.parametrize("tool", ["mcp__cua__mission_finish", "mcp__cua__issue_update", "mcp__cua__message_post"])
+def test_settings_registers_hook(tool: str) -> None:
     cfg = json.loads((ROOT / ".claude/settings.json").read_text(encoding="utf-8"))
-    entries = [e for e in cfg["hooks"]["PreToolUse"] if e["matcher"] == TOOL]
-    assert entries, "no PreToolUse entry for mission_finish"
+    entries = [e for e in cfg["hooks"]["PreToolUse"] if re.fullmatch(e["matcher"], tool)]
+    assert entries, f"no PreToolUse entry matches {tool}"
     assert any("scripts/polish_hook.py" in h["command"] for e in entries for h in e["hooks"])
+    assert not re.fullmatch(entries[0]["matcher"], "mcp__cua__doc_write")

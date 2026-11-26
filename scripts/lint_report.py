@@ -15,6 +15,10 @@ TRANSLATIONESE = [
     r"통과(를|함을) 확인했", r"이를 통해", r"해당 ", r"가 아니라 .*입니다",
 ]
 NOMINAL = [r"구축", r"연동", r"등록되었"]
+NOUNSTACK = [r"향후", r"(?<![가-힣])미(할당|설치|적용|반영|처리|확인)", r"비활성화", r"(병합|실행|설치|호출|배포) 시(?![가-힣])", r"기존 "]
+SELFRATE = [r"명확한", r"완결할 수 있", r"바로 마무리"]
+# a whole report that only says a ticket or task is done
+EMPTY = r"(?:[A-Z]+-\d+|작업|미션)\S*(?:\s+\S+[을를])?\s*(?:마쳤|끝났|끝냈|완료했)습니다\.?"
 CONNECTORS = r"(상태에서|되었고|되었으며|했으며|반면|하므로|이므로|되어)"  # heavy joins; plain 하고/이고 stay allowed
 FILE = r"[\w./-]+\.(py|json|toml|md|ts|tsx|rs|yml|yaml|sql)\b"
 HINTS = {
@@ -24,6 +28,9 @@ HINTS = {
     "english": "영어 보고: 문장을 한국어로 쓰고 식별자만 원문으로 둔다 (패턴 3)",
     "chained": "긴 문장: 사실 하나에 한 문장으로 나눈다 (패턴 4)",
     "middot": "가운뎃점: '구현하고 검증해'처럼 동사로 푼다 (함께 지킬 것)",
+    "nounstack": "한자어 명사: '앞으로', '설치하지 않으면', '맡은 사람이 없다'처럼 풀어 쓴다 (패턴 5)",
+    "selfrate": "스스로 매긴 평가: '명확한', '완결할 수 있는'을 지우고 근거 사실을 쓴다 (패턴 6)",
+    "empty": "빈 보고: 무엇이 달라졌는지 한 문장을 붙인다 (패턴 7)",
 }
 
 
@@ -40,16 +47,20 @@ def sentences(text: str) -> list[str]:
 def lint(text: str) -> list[tuple[str, str]]:
     """Return (pattern id, excerpt) for every finding in text."""
     found: list[tuple[str, str]] = []
+    whole = re.sub(r"^\s*>\s?", "", text, flags=re.M).strip()
+    if re.fullmatch(EMPTY, whole):
+        found.append(("empty", whole[:60]))
     for s in sentences(text):
         plain = re.sub(r"`[^`]*`", "", s)
         for rx in TRANSLATIONESE:
             m = re.search(rx, plain)
             if m:
                 found.append(("translationese", m.group(0)))
-        for rx in NOMINAL:
-            m = re.search(rx, plain)
-            if m:
-                found.append(("nominal", m.group(0)))
+        for kind, rxs in (("nominal", NOMINAL), ("nounstack", NOUNSTACK), ("selfrate", SELFRATE)):
+            for rx in rxs:
+                m = re.search(rx, plain)
+                if m:
+                    found.append((kind, m.group(0)))
         if "·" in plain:
             found.append(("middot", plain[max(0, plain.find("·") - 6) : plain.find("·") + 6]))
         parens = re.findall(r"\(([^)]*)\)", s)
