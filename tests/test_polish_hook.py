@@ -45,6 +45,16 @@ def test_passes_clean_report() -> None:
     assert res.returncode == 0, res.stderr
 
 
+def test_blocks_bare_done_and_nounstack_outside_examples() -> None:
+    done = _run("mcp__cua__issue_update", {"id": 3, "status": "review", "comment": "리뷰를 마쳤습니다."})
+    assert done.returncode == 2 and "empty: " in done.stderr, done.stderr
+    noun = _run("mcp__cua__message_post", {"text": "검토 시 기준선을 봅니다."})
+    assert noun.returncode == 2 and "nounstack: " in noun.stderr, noun.stderr
+    assert _run("mcp__cua__message_post", {"text": "3시에 배포합니다."}).returncode == 0
+    unclear = _run("mcp__cua__issue_update", {"id": 3, "status": "review", "comment": "기준이 불명확한 문장입니다."})
+    assert unclear.returncode == 0, unclear.stderr
+
+
 def test_blocks_review_comment() -> None:
     res = _run("mcp__cua__issue_update", {"id": 3, "status": "review", "comment": "AOM-19 채점을 마쳤습니다."})
     assert res.returncode == 2, res.stderr
