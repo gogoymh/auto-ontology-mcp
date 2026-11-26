@@ -1,0 +1,94 @@
+---
+name: polish
+description: Rewrite text an agent wrote for people (channel messages, mission reasons, completion reports, issue comments, docs, UI copy) so it reads like a person wrote it, without changing its meaning. Use before posting any Korean message or report, and when reviewing agent text for translationese, crammed lists, English reports in Korean channels, or long chained sentences.
+---
+
+# polish
+
+에이전트가 쓴 글을 사람이 쓴 말처럼 고친다. 뜻, 수치, 코드 식별자, 파일 이름, 티켓 번호는 그대로 둔다. 바꾸는 것은 문장 모양뿐이다.
+
+## 쓰는 순서
+
+1. 독자가 먼저 알아야 할 것(지금 상태, 달라진 것, 정할 것)을 첫 문장에 둔다.
+2. 아래 패턴을 하나씩 찾아 고친다.
+3. 다시 읽고 빼도 뜻이 통하는 말을 지운다.
+4. 고치기 전과 뒤의 수치, 이름, 번호가 같은지 대조한다.
+
+## 패턴 1. 번역투 (translationese)
+
+영어 문장 구조를 옮긴 표현이다. 판단을 부풀리고 주어를 흐린다.
+
+| 찾을 말 | 이렇게 |
+| --- | --- |
+| ~에 정확히 부합합니다, ~에 정확히 맞습니다 | ~입니다, ~라서 맡습니다 |
+| ~을(를) 대상으로 ~을 수행합니다 | ~으로 ~합니다 |
+| ~하도록 구현했습니다 | ~합니다, ~하게 했습니다 |
+| ~ 통과를 확인했습니다 | ~를 통과합니다 |
+| 이를 통해, 해당 ~ | 그래서, 이 ~ (또는 지운다) |
+| ~가 아니라 ~입니다 (강조용) | 뒷말만 쓴다 |
+
+고치기 전:
+> 벤치마크 자동 실행·기준선 비교 연동은 @benchmark의 역할에 정확히 부합합니다.
+
+고친 뒤:
+> 벤치마크를 자동으로 돌려 기준선과 비교하는 일은 제 역할입니다.
+
+고치기 전:
+> 병합된 미션의 채점과 후속 티켓 정리는 제 역할에 정확히 맞고, 다른 봇이 맡은 일과도 겹치지 않습니다.
+
+고친 뒤:
+> 병합된 미션을 채점하고 후속 티켓을 정리하는 일은 제 몫이고, 다른 봇의 일과 겹치지 않습니다.
+
+## 패턴 2. 파일명과 수치를 한 문장에 몰아 넣는 나열 (crammed list)
+
+한 문장에 파일 경로, 괄호 설명, 개수, 점수가 다 들어가면 독자는 무엇이 달라졌는지 못 찾는다. 사용자가 얻는 동작을 먼저 한 문장으로 쓰고, 근거 수치는 다음 문장에, 파일 이름은 꼭 필요할 때만 마지막에 모은다. 괄호 안에 또 설명을 넣지 않는다.
+
+고치기 전:
+> 내장 데모 DB와 지식 베이스를 대상으로 76개 고정 과제 셋(benchmarks/tasks.json)과 헤드리스 측정 및 비교 스크립트(benchmarks/run_benchmark.py)를 추가했습니다. 5개 핵심 영역 초기 기준선(benchmarks/baseline.json, 종합 점수 1.0000)을 저장했고 ruff 린트와 tests/test_benchmark.py 4개 테스트 통과를 확인했습니다.
+
+고친 뒤:
+> 내장 데모 DB와 지식 베이스로 돌리는 벤치마크를 더했습니다. 고정 과제 76개를 5개 영역에서 화면 없이 측정하고 비교하며, 첫 기준선은 종합 1.0000입니다. 과제는 `benchmarks/tasks.json`, 측정 스크립트는 `benchmarks/run_benchmark.py`, 기준선은 `benchmarks/baseline.json`에 있고, ruff와 `tests/test_benchmark.py`의 테스트 4개를 통과합니다.
+
+고치기 전:
+> pyproject.toml에 선택적 semantic extra(fastembed, sqlite-vec)를 추가하고, 설치된 환경에서 로컬 벡터 인덱스를 증분 갱신해 textindex.py(RRF 융합)와 search.py(점수 결합)의 하이브리드 검색을 수행하도록 구현했습니다.
+
+고친 뒤:
+> semantic extra를 설치하면 로컬 벡터 인덱스를 더한 하이브리드 검색을 씁니다. 설치하지 않으면 지금 검색이 그대로 동작합니다. extra는 fastembed와 sqlite-vec이고, 인덱스는 바뀐 부분만 다시 만듭니다. 결과는 `textindex.py`에서 RRF로, `search.py`에서 점수로 합칩니다.
+
+## 패턴 3. 한국어 채널에 영어로 쓴 완료 보고 (English report in a Korean channel)
+
+채널의 말이 한국어면 보고도 한국어로 쓴다. 코드 식별자, 명령, 지표 이름(recall@3, p50)은 원문 그대로 두고, 문장만 옮긴다. 제목과 첫 문장의 언어가 다르게 섞이지 않게 한다. 내용 없이 '작업을 마쳤습니다'만 남기지 말고 결과 한 문장을 붙인다.
+
+고치기 전:
+> Added 27 synonym, paraphrase and Korean-English cross-lingual queries to benchmarks/tasks.json. run_benchmark.py --semantic now compares lexical and hybrid search: recall@3 went from 0.40 to 0.84 (cross-lingual 0.00 → 0.83), and p50 latency went from about 4.9 ms to 9.3 ms.
+
+고친 뒤:
+> `run_benchmark.py --semantic`으로 어휘 검색과 하이브리드 검색을 비교합니다. 하이브리드 검색은 recall@3을 0.40에서 0.84로 올렸고, 한영 교차 질문은 0.00에서 0.83이 됐습니다. 대신 p50 지연은 약 4.9 ms에서 9.3 ms로 늘었습니다. 비교에 쓴 동의어, 바꿔 말하기, 한영 교차 질문 27개는 `benchmarks/tasks.json`에 더했습니다.
+
+고치기 전:
+> I finished reviewing AOM-11.
+
+고친 뒤:
+> AOM-11 리뷰를 마쳤습니다.
+
+## 패턴 4. '~한 상태에서 ~되었고'처럼 길게 이어지는 문장 (chained sentence)
+
+'~한 상태에서', '~되었고', '~한 반면', '~하므로'로 사실 서너 개를 한 문장에 이으면 주어가 중간에 바뀌고 결론이 맨 끝에 묻힌다. 사실 하나에 한 문장을 쓰고, 결론(그래서 무엇을 하는지)을 앞이나 끝에 따로 둔다. 원인과 결과처럼 붙어 있어야 뜻이 사는 것만 한 문장으로 잇는다.
+
+고치기 전:
+> AOM-13으로 구축한 벤치마크 스크립트와 기준선이 preconquer-gogoymh에 병합된 상태에서 새 이슈 AOM-15(CI에 벤치마크 기준선 비교 단계 추가)가 미할당으로 등록되었고, 벤치마크 자동 실행·기준선 비교 연동은 @benchmark의 역할에 정확히 부합합니다.
+
+고친 뒤:
+> AOM-15를 맡습니다. AOM-13의 벤치마크 스크립트와 기준선은 preconquer-gogoymh에 병합됐고, CI에서 기준선과 비교하는 일(AOM-15)은 아직 맡은 사람이 없습니다. 이 일은 제 역할입니다.
+
+고치기 전:
+> 나머지 이슈는 원격 푸시·PR 관리·사용자 결정이 필요한 반면, 이 이슈는 코드만으로 독립 워크트리에서 구현·검증·병합할 수 있는 명확한 검색 품질 개선 작업입니다.
+
+고친 뒤:
+> 이 이슈는 코드만으로 워크트리에서 끝낼 수 있어 먼저 맡습니다. 나머지는 원격 푸시나 PR 관리, 사용자 결정을 기다려야 합니다.
+
+## 함께 지킬 것
+
+- 가운뎃점(·)으로 명사를 묶지 않는다. '구현·검증·병합'은 '구현하고 검증해 병합'으로 쓴다.
+- '구축', '수행', '연동', '등록되었고' 같은 명사형 동사보다 '만들다', '하다', '잇다', '올라왔다'를 쓴다.
+- 고칠 때 없던 판단이나 수치를 더하지 않는다. 원문에 없는 내용이 필요하면 고치지 말고 원문 작성자에게 묻는다.
