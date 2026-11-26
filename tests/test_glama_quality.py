@@ -9,6 +9,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 from fastmcp import Client
 
@@ -174,18 +175,40 @@ def test_glama_json_manifest():
     assert "gogoymh" in maintainers
 
 
-def test_release_tags_and_workflow():
+def _read_release_tags(repo_root: Path) -> tuple[dict[str, str] | None, str | None]:
+    try:
+        shallow = subprocess.run(
+            ["git", "rev-parse", "--is-shallow-repository"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return None, "git executable is unavailable"
+    if shallow.returncode != 0:
+        return None, "git metadata is unavailable in this checkout"
+    if shallow.stdout.strip().lower() == "true":
+        return None, "shallow git clone does not guarantee release tags"
+
+    refs = subprocess.run(
+        ["git", "for-each-ref", "--format=%(refname:short) %(objecttype)", "refs/tags"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if refs.returncode != 0:
+        return None, "git tags could not be read"
+    tags = dict(line.split(maxsplit=1) for line in refs.stdout.strip().splitlines() if line.strip())
+    if not tags:
+        return None, "git checkout has no fetched tags"
+    return tags, None
+
+
+def test_release_workflow_and_version():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     assert pyproject["project"]["version"] == __version__
-
-    out = subprocess.check_output(
-        ["git", "for-each-ref", "--format=%(refname:short) %(objecttype)", "refs/tags"],
-        cwd=ROOT,
-        text=True,
-    )
-    tags = dict(line.split(maxsplit=1) for line in out.strip().splitlines() if line.strip())
-    for expected_tag in ("v0.4.0", "v0.5.0", "v0.6.0", f"v{__version__}"):
-        assert tags.get(expected_tag) == "tag", f"annotated git tag {expected_tag} is missing"
 
     workflow_path = ROOT / ".github" / "workflows" / "release.yml"
     assert workflow_path.is_file(), ".github/workflows/release.yml must exist"
@@ -196,3 +219,74 @@ def test_release_tags_and_workflow():
     commands = "\n".join(s.get("run", "") for s in steps if isinstance(s, dict))
     assert "__version__" in commands
     assert "gh release create" in commands
+
+
+def test_release_tags():
+    tags, skip_reason = _read_release_tags(ROOT)
+    if skip_reason is not None:
+        pytest.skip(skip_reason)
+    assert tags is not None
+    for expected_tag in ("v0.4.0", "v0.5.0", "v0.6.0", f"v{__version__}"):
+        assert tags.get(expected_tag) == "tag", f"annotated git tag {expected_tag} is missing"
+
+
+def test_git_tag_detection_handles_shallow_and_tagless_repos(tmp_path: Path):
+    plain_dir = tmp_path / "plain"
+    plain_dir.mkdir()
+    tags, reason = _read_release_tags(plain_dir)
+    assert tags is None and reason is not None
+
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    git = ["git", "-c", "user.name=test", "-c", "user.email=test@example.com"]
+    subprocess.run([*git, "init", "-q"], cwd=origin, check=True)
+    (origin / "README.md").write_text("hi\n", encoding="utf-8")
+    subprocess.run([*git, "add", "README.md"], cwd=origin, check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "init"], cwd=origin, check=True)
+
+    tags, reason = _read_release_tags(origin)
+    assert tags is None and "no fetched tags" in (reason or "")
+
+    subprocess.run([*git, "tag", "-a", "v0.1.0", "-m", "v0.1.0"], cwd=origin, check=True)
+    tags, reason = _read_release_tags(origin)
+    assert reason is None and tags == {"v0.1.0": "tag"}
+
+    shallow = tmp_path / "shallow"
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "1", "--no-tags", origin.as_uri(), str(shallow)],
+        check=True,
+    )
+    tags, reason = _read_release_tags(shallow)
+    assert tags is None and "shallow" in (reason or "")
+
+
+def test_ci_workflow_fetches_tags_and_runs_semantic_tests():
+    workflow_path = ROOT / ".github" / "workflows" / "ci.yml"
+    assert workflow_path.is_file(), ".github/workflows/ci.yml must exist"
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["test"]["steps"]
+
+    checkout = next(s for s in steps if isinstance(s, dict) and str(s.get("uses", "")).startswith("actions/checkout@"))
+    checkout_with = checkout.get("with") or {}
+    assert checkout_with.get("fetch-depth") == 0
+    assert checkout_with.get("fetch-tags") is True
+
+    cache = next(s for s in steps if isinstance(s, dict) and str(s.get("uses", "")).startswith("actions/cache@"))
+    cache_with = cache.get("with") or {}
+    cache_path = cache_with.get("path")
+    assert isinstance(cache_path, str) and cache_path.strip()
+    assert isinstance(cache_with.get("key"), str) and "fastembed" in cache_with["key"]
+
+    sync_idx = next(
+        i for i, s in enumerate(steps) if isinstance(s, dict) and "uv sync --extra semantic" in (s.get("run") or "")
+    )
+    sem_idx, sem_step = next(
+        (i, s)
+        for i, s in enumerate(steps)
+        if isinstance(s, dict)
+        and "test_semantic_search.py" in (s.get("run") or "")
+        and "test_benchmark_semantic_model.py" in (s.get("run") or "")
+    )
+    assert sync_idx < sem_idx
+    sem_env = sem_step.get("env") or {}
+    assert sem_env.get("AUTO_ONTOLOGY_EMBEDDING_CACHE") == cache_path
