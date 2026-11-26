@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check that .claude/skills/polish/SKILL.md covers one pattern with a before/after example.
 
-Usage: python3 scripts/check_polish_skill.py <frontmatter|translationese|crammed|english|chained|checklist|guide>
+Usage: python3 scripts/check_polish_skill.py <frontmatter|translationese|crammed|english|chained|nounstack|selfrate|empty|checklist|guide>
 Exits 0 only when the requested part is present and its rewrite drops the flagged phrase.
 "checklist" checks the pre-report procedure and checklist; "guide" checks that CLAUDE.md points report writers to it.
 """
@@ -21,7 +21,11 @@ PATTERNS = {
     "crammed": ("(crammed list)", r"(\([^)]*\.(json|py|toml)[^)]*\).*){2,}"),
     "english": ("(English report in a Korean channel)", r"^[^가-힣]*[A-Za-z]{3,}[^가-힣]*$"),
     "chained": ("(chained sentence)", r"상태에서.*되었고"),
+    "nounstack": ("(noun stack)", r"향후|미설치|비활성화|기존 "),
+    "selfrate": ("(self-rating)", r"명확한|완결할 수 있|바로 마무리"),
+    "empty": ("(empty report)", r"^\S+ (\S+[을를] )?(마쳤|끝났|끝냈)습니다\.?\s*$"),
 }
+HOOKED = ("mission_finish", "issue_update", "message_post")  # tools polish_hook.py checks
 
 
 def log(msg: str) -> None:
@@ -54,13 +58,14 @@ def check(name: str) -> bool:
         sec = section(text, CHECKLIST_TAG)
         steps = re.findall(r"^\d+\. .+", sec, re.M)
         items = re.findall(r"^- \[ \] .+", sec, re.M)
-        covered = {n for n in "1234" if any(f"패턴 {n}" in i for i in items)}
-        ok = bool(sec) and len(steps) >= 3 and "scripts/lint_report.py" in sec and LINT.exists() and covered == set("1234")
-        log(f"checklist ok={ok} steps={len(steps)} items={len(items)} patterns={sorted(covered)}")
+        covered = {n for n in "1234567" if any(f"패턴 {n}" in i for i in items)}
+        hooked = all(t in sec for t in HOOKED) and "scripts/polish_hook.py" in sec
+        ok = bool(sec) and len(steps) >= 3 and "scripts/lint_report.py" in sec and LINT.exists() and covered == set("1234567") and hooked
+        log(f"checklist ok={ok} steps={len(steps)} items={len(items)} patterns={sorted(covered)} hooked={hooked}")
         return ok
     if name == "guide":
         guide = GUIDE.read_text(encoding="utf-8") if GUIDE.exists() else ""
-        need = [".claude/skills/polish/SKILL.md", CHECKLIST_TAG.lstrip("# "), "scripts/lint_report.py", "mission_finish"]
+        need = [".claude/skills/polish/SKILL.md", CHECKLIST_TAG.lstrip("# "), "scripts/lint_report.py", *HOOKED]
         missing = [n for n in need if n not in guide]
         ok = not missing and CHECKLIST_TAG in text
         log(f"guide ok={ok} missing={missing}")
@@ -71,7 +76,7 @@ def check(name: str) -> bool:
     if not before or len(before) != len(after):
         log(f"{name}: need paired examples, got before={len(before)} after={len(after)}")
         return False
-    flags = re.M if name == "english" else 0
+    flags = re.M if name in ("english", "empty") else 0
     hit = [b for b in before if re.search(rx, b.replace("> ", ""), flags)]
     if not hit:
         log(f"{name}: no 'before' example shows the pattern")

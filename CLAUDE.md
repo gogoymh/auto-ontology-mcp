@@ -7,3 +7,5 @@ Before you post a completion report (mission_finish summary and next, the commen
 1. Run `python3 scripts/lint_report.py <draft>` (or pipe the draft on stdin).
 2. Rewrite every flagged line with the matching pattern in the skill until it prints `ok: no polish patterns found`.
 3. Check that numbers, file names, ticket numbers and commands did not change.
+
+`scripts/polish_hook.py` runs the same check as a PreToolUse hook on mission_finish, issue_update (comment) and message_post (text), and blocks the call while a pattern is left.
