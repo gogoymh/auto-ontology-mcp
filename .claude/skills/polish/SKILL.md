@@ -1,6 +1,6 @@
 ---
 name: polish
-description: Rewrite text an agent wrote for people (channel messages, mission reasons, completion reports, issue comments, docs, UI copy) so it reads like a person wrote it, without changing its meaning. Use before posting any Korean message or report, and when reviewing agent text for translationese, crammed lists, English reports in Korean channels, or long chained sentences.
+description: Rewrite text an agent wrote for people (channel messages, mission reasons, completion reports, issue comments, docs, UI copy) so it reads like a person wrote it, without changing its meaning. Use before posting any Korean message or report (run the pre-report check in this skill before mission_finish, issue review comments and channel posts), and when reviewing agent text for translationese, crammed lists, English reports in Korean channels, or long chained sentences.
 ---
 
 # polish
@@ -92,3 +92,23 @@ description: Rewrite text an agent wrote for people (channel messages, mission r
 - 가운뎃점(·)으로 명사를 묶지 않는다. '구현·검증·병합'은 '구현하고 검증해 병합'으로 쓴다.
 - '구축', '수행', '연동', '등록되었고' 같은 명사형 동사보다 '만들다', '하다', '잇다', '올라왔다'를 쓴다.
 - 고칠 때 없던 판단이나 수치를 더하지 않는다. 원문에 없는 내용이 필요하면 고치지 말고 원문 작성자에게 묻는다.
+
+## 완료 보고 전 점검
+
+완료 보고(mission_finish의 summary와 next, 이슈를 review로 넘길 때 남기는 댓글, 채널에 올리는 결과 메시지)를 올리기 전에 초안을 이 순서로 점검한다.
+
+1. 초안을 파일로 저장하고 `python3 scripts/lint_report.py 초안.txt`를 돌린다. 파일 없이 `echo "초안" | python3 scripts/lint_report.py`도 된다.
+2. 찾은 줄마다 붙은 패턴 번호의 절을 읽고 고친 뒤 예처럼 고친다. 스크립트가 못 잡는 표현도 아래 목록으로 한 번 더 본다.
+3. 상태 0(`ok: no polish patterns found`)이 나올 때까지 1과 2를 되풀이한다.
+4. 고치기 전과 뒤의 수치, 파일 이름, 티켓 번호, 명령이 같은지 대조한 뒤 올린다.
+
+스크립트는 패턴을 찾을 뿐 고치지 않는다. 일부러 남긴 표현이라 판단하면 그대로 올려도 되지만, 그 줄이 왜 괜찮은지 스스로 설명할 수 있어야 한다.
+
+점검 목록:
+
+- [ ] 번역투: '부합합니다', '~을 대상으로', '수행', '~하도록 구현했습니다', '이를 통해', '해당'이 없다. (패턴 1)
+- [ ] 나열: 첫 문장이 사용자가 얻는 동작이고, 한 문장에 괄호 속 파일 이름이나 수치를 몰아 넣지 않았다. (패턴 2)
+- [ ] 언어: 채널이 한국어면 문장이 한국어다. 식별자, 명령, 지표 이름만 원문으로 둔다. (패턴 3)
+- [ ] 긴 문장: '~한 상태에서', '~되었고', '~한 반면'으로 사실 서너 개를 잇지 않았다. (패턴 4)
+- [ ] 가운뎃점과 명사형 동사('구축', '연동')를 쓰지 않았다. (함께 지킬 것)
+- [ ] 수치, 이름, 번호가 고치기 전과 같고, 없던 판단을 더하지 않았다.

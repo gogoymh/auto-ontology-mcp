@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """Check that .claude/skills/polish/SKILL.md covers one pattern with a before/after example.
 
-Usage: python3 scripts/check_polish_skill.py <frontmatter|translationese|crammed|english|chained>
+Usage: python3 scripts/check_polish_skill.py <frontmatter|translationese|crammed|english|chained|checklist|guide>
 Exits 0 only when the requested part is present and its rewrite drops the flagged phrase.
+"checklist" checks the pre-report procedure and checklist; "guide" checks that CLAUDE.md points report writers to it.
 """
 import re
 import sys
 from pathlib import Path
 
-SKILL = Path(__file__).resolve().parent.parent / ".claude/skills/polish/SKILL.md"
+ROOT = Path(__file__).resolve().parent.parent
+SKILL = ROOT / ".claude/skills/polish/SKILL.md"
+GUIDE = ROOT / "CLAUDE.md"
+LINT = ROOT / "scripts/lint_report.py"
+CHECKLIST_TAG = "## 완료 보고 전 점검"
 
 # section heading tag -> regex the "before" example must match and the "after" example must not
 PATTERNS = {
@@ -45,6 +50,21 @@ def check(name: str) -> bool:
         ok = bool(m and re.search(r"^name: polish$", m.group(1), re.M) and re.search(r"^description: .{40,}", m.group(1), re.M))
         log(f"frontmatter ok={ok}")
         return ok
+    if name == "checklist":
+        sec = section(text, CHECKLIST_TAG)
+        steps = re.findall(r"^\d+\. .+", sec, re.M)
+        items = re.findall(r"^- \[ \] .+", sec, re.M)
+        covered = {n for n in "1234" if any(f"패턴 {n}" in i for i in items)}
+        ok = bool(sec) and len(steps) >= 3 and "scripts/lint_report.py" in sec and LINT.exists() and covered == set("1234")
+        log(f"checklist ok={ok} steps={len(steps)} items={len(items)} patterns={sorted(covered)}")
+        return ok
+    if name == "guide":
+        guide = GUIDE.read_text(encoding="utf-8") if GUIDE.exists() else ""
+        need = [".claude/skills/polish/SKILL.md", CHECKLIST_TAG.lstrip("# "), "scripts/lint_report.py", "mission_finish"]
+        missing = [n for n in need if n not in guide]
+        ok = not missing and CHECKLIST_TAG in text
+        log(f"guide ok={ok} missing={missing}")
+        return ok
     tag, rx = PATTERNS[name]
     sec = section(text, tag)
     before, after = examples(sec, "고치기 전"), examples(sec, "고친 뒤")
@@ -68,7 +88,7 @@ def check(name: str) -> bool:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2 or sys.argv[1] not in {"frontmatter", *PATTERNS}:
+    if len(sys.argv) != 2 or sys.argv[1] not in {"frontmatter", "checklist", "guide", *PATTERNS}:
         print(__doc__)
         sys.exit(2)
     sys.exit(0 if check(sys.argv[1]) else 1)
