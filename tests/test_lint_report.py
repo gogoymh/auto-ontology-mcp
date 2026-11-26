@@ -122,3 +122,86 @@ def test_crammed_and_passive_outside_examples() -> None:
     for text in ("병합되어 있고 설치되어 있으면 검색은 그대로입니다.", "tasks.json과 baseline.json을 읽었습니다."):
         ok = _run(text)
         assert ok.returncode == 0, (text, ok.stdout)
+
+
+def _kinds(text: str) -> tuple[int, set[str]]:
+    res = _run(text)
+    return res.returncode, set(re.findall(r"^(\w+): ", res.stdout, re.M))
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("필요 없이 작업을 마쳤습니다.", ["필요 없이 작업을 마쳤습니다."]),
+        ("중요 지표를 고쳤습니다. 리뷰를 마쳤습니다.", ["중요 지표를 고쳤습니다.", "리뷰를 마쳤습니다."]),
+        ("다 끝났습니다.", ["다 끝났습니다."]),
+        ("예를 들어 e.g. 이렇게 씁니다. 다음 문장입니다.", ["예를 들어 e.g. 이렇게 씁니다.", "다음 문장입니다."]),
+        ("1. 작업을 마쳤습니다.\n- 리뷰를 마쳤어요 다음은 내일입니다", ["작업을 마쳤습니다.", "리뷰를 마쳤어요", "다음은 내일입니다"]),
+        ("점수는 0.84. 다음입니다.", ["점수는 0.84.", "다음입니다."]),
+    ],
+)
+def test_sentence_split(text: str, expected: list[str]) -> None:
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from lint_report import sentences
+
+    assert sentences(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "다 끝났습니다.",
+        "필요 없이 작업을 마쳤습니다.",
+        "작업을 마쳤어요.",
+        "작업이 완료되었습니다.",
+        "AOM-30 작업을 마무리했습니다.",
+        "작업을 마쳤습니다!",
+        "리뷰를 마쳤습니다. 확인 부탁드립니다.",
+        "작업을 마쳤습니다. 감사합니다.",
+        "1. 작업을 마쳤습니다.\n2. 리뷰를 마쳤습니다.",
+    ],
+)
+def test_empty_variants_flagged(text: str) -> None:
+    code, kinds = _kinds(text)
+    assert code == 1 and "empty" in kinds, (text, kinds)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "작업을 마쳤어요. recall@3이 0.84로 올랐어요.",
+        "리뷰를 마쳤습니다. #28은 병합해도 됩니다. 감사합니다.",
+        "중요 지표를 고쳤습니다. 리뷰를 마쳤습니다.",
+        "감사합니다.",
+    ],
+)
+def test_empty_variants_with_result_pass(text: str) -> None:
+    code, kinds = _kinds(text)
+    assert "empty" not in kinds, (text, kinds)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "scripts/a.py와 scripts/b.py와 tests/c.py에 테스트 5개를 더했습니다.",
+        "a.py, b.py, c.py로 검사 3개를 만들었습니다.",
+        "AOM-33에서 a.py, b.py, c.py에 패턴 2개를 넣었습니다.",
+    ],
+)
+def test_crammed_without_parens_flagged(text: str) -> None:
+    code, kinds = _kinds(text)
+    assert code == 1 and "crammed" in kinds, (text, kinds)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "test_v2.py와 a.py와 b.py를 고쳤습니다.",
+        "AOM-33에서 a.py, b.py, c.py를 고쳤습니다.",
+        "#28에서 a.py, b.py, c.py를 바꿨습니다.",
+        "a.py, b.py, c.py 3개를 읽었습니다.",
+    ],
+)
+def test_crammed_without_parens_pass(text: str) -> None:
+    code, kinds = _kinds(text)
+    assert "crammed" not in kinds, (text, kinds)

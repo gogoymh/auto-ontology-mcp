@@ -26,13 +26,17 @@ NOUNSTACK = [
 # 불명확한 names the subject, so 명확한 must not match inside it
 SELFRATE = [r"(?<![가-힣])명확한", r"완결할 수 있", r"바로 마무리"]
 # a sentence that only announces completion; a result in that same sentence is not an empty report
-_DONE = re.compile(r"(?:마쳤|끝났|끝냈|완료했)습니다\.?$")
+_DONE = re.compile(
+    r"(?:마쳤|끝났|끝냈|완료했|완료됐|완료되었|마무리했|마무리됐|마무리되었)(?:습니다|어요|다)[.!]*$"
+)
+# greetings and requests carry no result, so they do not turn an empty report into a full one
+_FILLER = re.compile(r"^(?:감사합니다|고맙습니다|수고하셨습니다|(?:확인|리뷰|검토)\s?(?:부탁드립니다|바랍니다))[.!]*$")
 _RESULT = re.compile(r"\d+\.\d+|\d+점|올리|올라|올랐|올렸|내리|내려|줄었|줄어|늘었|늘어|고쳤|고쳐|통과")
 # three or more paths plus a number and one of these verbs, even with no parentheses
-_CRAM_ACT = re.compile(r"추가|구현|저장|수행|넣었|고쳤")
+_CRAM_ACT = re.compile(r"추가|구현|저장|수행|넣었|고쳤|더했|만들었|바꿨|옮겼|지웠|붙였")
 CONNECTORS = r"(상태에서|되었고|되었으며|했으며|반면|하므로|이므로)"  # 되어/하고/이고 stay allowed
 # \b misses a path glued to a Korean particle (tasks.json과). Stop at an ASCII word char instead.
-FILE = r"[\w./-]+\.(py|json|toml|md|ts|tsx|rs|yml|yaml|sql)(?![A-Za-z0-9_])"
+FILE = r"[\w./-]+\.(py|json|toml|md|ts|tsx|js|jsx|rs|yml|yaml|sql|sh|txt)(?![A-Za-z0-9_])"
 HINTS = {
     "translationese": "번역투: 짧은 동사로 고친다 (패턴 1)",
     "nominal": "명사형 동사: '만들다', '잇다', '올라왔다'로 고친다 (함께 지킬 것)",
@@ -50,15 +54,40 @@ def log(msg: str) -> None:
     print(f"[lint_report] {msg}", file=sys.stderr)
 
 
+# A sentence ends at . ! ? or at a Korean sentence ending, never after any 다 or 요 (필요, 중요, 다 끝났다).
+_END = re.compile(r"(?:(?<=[.!?])|(?<=니다)|(?<=[었았였했겠]다)|(?<=[어아여해세에죠]요))\s+|\n+")
+_ABBREV = re.compile(r"\b(?:e\.g|i\.e|vs|etc|cf)\.$", re.I)  # e.g. does not end a sentence
+_QUANTITY = re.compile(r"\d")
+_ID = re.compile(r"(?<![A-Za-z0-9])[A-Z][A-Z0-9]*-\d+|#\d+|(?<![\w.])v?\d+(?:\.\d+){2,}(?![\d.])")  # AOM-33, #28, v1.2.3
+
+
 def sentences(text: str) -> list[str]:
     text = re.sub(r"^\s*>\s?", "", text, flags=re.M)
-    parts = re.split(r"(?<=[.!?다요])\s+|\n+", text)
-    return [p.strip() for p in parts if p.strip()]
+    text = re.sub(r"^\s*(?:[-*•]|\d+[.)])\s+", "", text, flags=re.M)  # list markers
+    out: list[str] = []
+    buf = ""
+    pos = 0
+    for m in _END.finditer(text):
+        buf += text[pos : m.start()]
+        pos = m.end()
+        if "\n" not in m.group(0) and _ABBREV.search(buf):
+            buf += " "
+            continue
+        out.append(buf)
+        buf = ""
+    out.append(buf + text[pos:])
+    return [p.strip() for p in out if p.strip()]
+
+
+def has_quantity(s: str) -> bool:
+    """True when s holds a number outside file names, ticket ids and versions."""
+    rest = _ID.sub("", re.sub(FILE, "", s))
+    return bool(_QUANTITY.search(rest))
 
 
 def empty_report(text: str) -> bool:
     """True when every sentence only says that something finished."""
-    parts = sentences(text)
+    parts = [p for p in sentences(text) if not _FILLER.search(p)]
     return bool(parts) and all(_DONE.search(part) and not _RESULT.search(part) for part in parts)
 
 
@@ -83,7 +112,7 @@ def lint(text: str) -> list[tuple[str, str]]:
             found.append(("middot", plain[max(0, plain.find("·") - 6) : plain.find("·") + 6]))
         parens = re.findall(r"\(([^)]*)\)", s)
         paren_hit = len(parens) >= 3 or (len(parens) >= 2 and any(re.search(FILE, p) for p in parens))
-        file_hit = len(re.findall(FILE, s)) >= 3 and re.search(r"\d", s) and _CRAM_ACT.search(s)
+        file_hit = len(re.findall(FILE, s)) >= 3 and has_quantity(s) and _CRAM_ACT.search(s)
         if paren_hit or file_hit:
             found.append(("crammed", s[:60]))
         if not re.search(r"[가-힣]", s) and len(re.findall(r"\b[A-Za-z]{2,}\b", plain)) >= 3:
