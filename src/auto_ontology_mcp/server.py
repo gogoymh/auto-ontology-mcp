@@ -19,11 +19,12 @@ from .service import OntologyError, OntologyService
 
 logger = logging.getLogger(__name__)
 
-READ = ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=False)
-READ_DB = ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=True)
+READ = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
+READ_DB = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True)
 WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
 WRITE_DESTRUCTIVE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False)
-CONNECT = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True)
+WRITE_DB = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True)
+WRITE_DB_DESTRUCTIVE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True)
 
 TABLES_ARG = (
     "Tables and views to read, for very large schemas: case-insensitive globs such as ['SALES_*', 'HR.EMP*', "
@@ -53,8 +54,8 @@ class TermInput(BaseModel):
 
 class ColumnUpdate(BaseModel):
     column: str = Field(description="Physical column name mapped by this Term.")
-    display_name: str | None = None
-    description: str | None = None
+    display_name: str | None = Field(default=None, description="New user-friendly label with spaces, e.g. 'Order Date'; omit to keep current label.")
+    description: str | None = Field(default=None, description="New one-sentence business description; omit to keep current description.")
 
 
 class EntityColumn(BaseModel):
@@ -68,37 +69,37 @@ class EntityColumn(BaseModel):
 class SourceInput(BaseModel):
     id: int | None = Field(default=None, description="Existing source id; omit to register a new source.")
     title: str | None = Field(default=None, description="File name, page title or a short label, e.g. 'IMG_2041.jpg'.")
-    kind: str | None = Field(default=None, description="pdf, image, web, note, conversation, email, book, ...")
+    kind: str | None = Field(default=None, description="Source format such as pdf, image, web, note, conversation, email, or book.")
     uri: str | None = Field(default=None, description="Path or URL of the original, when known.")
-    author: str | None = None
-    published_on: str | None = Field(default=None, description="YYYY-MM-DD")
+    author: str | None = Field(default=None, description="Author, organization, or speaker who created the source.")
+    published_on: str | None = Field(default=None, description="Publication or capture date in YYYY-MM-DD format.")
     summary: str | None = Field(default=None, description="What the source is about, in a sentence or two.")
     content: str | None = Field(default=None, description="A short excerpt; save longer parts as passages and keep the full text as the original.")
     original: str | None = Field(default=None, description="Path of the original that is already in the Obsidian vault, relative to the vault, e.g. 'Clippings/Article.md'.")
-    original_text: str | None = Field(default=None, description="Full text (markdown) to keep as the original: written as a new note in the vault's originals folder. Use it for web pages, chats and transcriptions that exist nowhere else. When the document changed, pass the new text: it becomes a new note, the source points at it and the old note stays.")
-    original_file: str | None = Field(default=None, description="Absolute path of a local file (PDF, image, document) to copy into the vault as the original. A changed file is copied next to the old one, which stays.")
+    original_text: str | None = Field(default=None, description="Full markdown text saved as a new note in the vault's originals folder; passing updated text creates a new note and keeps the old one.")
+    original_file: str | None = Field(default=None, description="Absolute path of a local file (PDF, image, document) to copy into the vault as the original; changed files are copied beside the old one.")
 
 
 class PassageInput(BaseModel):
-    text: str = Field(description="One idea from the source: the words as written (kind quote) or your summary of one section (kind summary). Split long text into several passages.")
+    text: str = Field(description="One idea from the source: verbatim words (kind='quote') or section summary (kind='summary'). Split long text into separate passages.")
     kind: Literal["quote", "summary", "note"] = Field(default="quote", description="quote (words as written), summary (a section in other words) or note (the user's own comment).")
     heading: str | None = Field(default=None, description="Section heading in the original; links then open the original at that heading.")
     locator: str | None = Field(default=None, description="Page, timestamp or line, e.g. 'p. 12', '00:13:20', 'line 40'.")
     terms: list[str] | None = Field(default=None, description="Terms (concepts or entities) the passage is about; missing ones are created as empty concepts.")
-    note: str | None = None
-    id: int | None = Field(default=None, description="Existing passage id to update.")
+    note: str | None = Field(default=None, description="Optional caveat or personal comment attached to this passage.")
+    id: int | None = Field(default=None, description="Existing passage id to update in place.")
 
 
 class RelationInput(BaseModel):
     relation: str = Field(description="snake_case verb: is_a, part_of, has_part, instance_of, related_to, depends_on, causes, used_for, contrasts_with, same_as, example_of, ...")
     target: str = Field(description="Target Term name; created as an empty concept if it does not exist yet.")
-    description: str | None = None
+    description: str | None = Field(default=None, description="Optional brief explanation of how the source Term relates to the target Term.")
     evidence: str | None = Field(default=None, description="Quote that supports the link.")
 
 
 class RelationRef(BaseModel):
-    relation: str
-    target: str
+    relation: str = Field(description="Exact snake_case relation verb to remove, e.g. 'related_to'.")
+    target: str = Field(description="Exact target Term name whose link should be removed.")
 
 
 SourceArg = Annotated[
@@ -106,7 +107,14 @@ SourceArg = Annotated[
     Field(description="Where this came from: an existing source id, or a new source to register (deduplicated by uri or title)."),
 ]
 
-DEFINE_ENTITY_DESCRIPTION = 'Create an entity in the personal knowledge store (a Term with its own table of records), add columns to it as you learn more, or delete it. Search first (search_ontology or list_terms) and reuse an existing entity. Use entities for facts you will count, sum, filter or compare; use save_concept for definitions and explanations. Column types: text, integer, number, date, datetime, boolean, ref:<Entity> (a link that becomes a relationship). Names are snake_case English (pass table= when the entity name is not English); keys make re-adding a record update it. Existing column types cannot change. delete=true drops the entity; with force=true its records are deleted too, which cannot be undone. Then store rows with add_records.'
+DEFINE_ENTITY_DESCRIPTION = (
+    "Create, extend, or delete a table-backed entity in the personal knowledge store (a Term with typed columns). "
+    "Use for countable or filterable facts; search first with search_ontology or list_terms to reuse existing entities. "
+    "Use save_concept for prose definitions and save_table_terms for external SQL databases. "
+    "Adds new columns without altering existing column types; keys enable upsert in add_records. "
+    "Pass delete=true to drop the entity (requires force=true if rows exist, permanently deleting all records). "
+    "Returns the entity schema and table metadata."
+)
 
 
 class GlossaryEntry(BaseModel):
@@ -165,19 +173,17 @@ def build_server(settings: Settings | None = None, service: OntologyService | No
         return deco
 
     # ------------------------------------------------------------- readiness
-    @tool(READ_DB)
+    @tool(READ_DB, title="Check datasource and ontology readiness")
     def check_readiness() -> dict[str, Any]:
-        """Report every datasource's state: whether SQL can run against it, how much is modeled (Terms,
-        relationships, SQL attributes), knowledge store counts, and the next step. Call it first in
-        a session and whenever a question fails unexpectedly. Read-only."""
+        """Inspect every registered datasource and the personal knowledge store to report SQL connectivity, modeling coverage (Terms, relationships, SQL attributes), record counts, and recommended next steps. Call at the start of a session or after unexpected failures; use list_terms or describe_table to inspect specific ontology objects instead. Opens registered databases read-only and returns per-datasource status summaries."""
         return svc.check_readiness()
 
     # ---------------------------------------------------------- datasources
     if settings.allow_datasource_tools:
 
-        @tool(CONNECT)
+        @tool(WRITE_DB, title="Register a database datasource")
         def add_datasource(
-            name: Annotated[str, Field(description="Short name, e.g. 'shop'.")],
+            name: Annotated[str, Field(description="Short datasource identifier without path separators, e.g. 'shop'.")],
             url: Annotated[
                 str,
                 Field(
@@ -186,117 +192,91 @@ def build_server(settings: Settings | None = None, service: OntologyService | No
                     "oracle+oracledb://user:pass@host:1521/?service_name=ORCLPDB1."
                 ),
             ],
-            description: Annotated[str | None, Field(description="What this database holds.")] = None,
+            description: Annotated[str | None, Field(description="Brief business summary of what this database holds.")] = None,
             schemas: Annotated[list[str] | None, Field(description="Schemas to include (default: all non-system schemas).")] = None,
-            scan: Annotated[bool, Field(description="Scan the schema right away.")] = True,
+            scan: Annotated[bool, Field(description="Scan the schema and profile columns immediately after connecting.")] = True,
             tables: Annotated[list[str] | None, Field(description=TABLES_ARG + " Saved with the datasource for later scans.")] = None,
         ) -> dict[str, Any]:
-            """Register a database by SQLAlchemy URL, test the connection and, by default, scan it. Use it only
-            when the user gives you a URL; never invent credentials. Connections are opened
-            read-only and nothing is ever written to the database. Re-using a name replaces that
-            datasource's URL. Fails with the driver or connection error if the database cannot
-            be reached; use scan_datasource to re-read one that is already registered."""
+            """Register a relational database by SQLAlchemy URL, verify read-only connectivity, and optionally scan its schema. Use only when the user supplies a URL; never invent credentials, and use scan_datasource instead to re-read an already registered database. Connections are strictly read-only and never modify the target database. Reusing an existing name updates its URL and saved filter while preserving modeled Terms; fails with the connection or driver error if unreachable."""
             return svc.add_datasource(name, url, description, schemas, scan, tables)
 
-        @tool(WRITE)
+        @tool(WRITE_DB, title="Scan database schema and profiles")
         def scan_datasource(
             datasource: DatasourceArg = None,
-            schemas: Annotated[list[str] | None, Field(description="Limit the scan to these schemas.")] = None,
-            profile: Annotated[bool, Field(description="Sample rows to profile columns and test inferred joins.")] = True,
+            schemas: Annotated[list[str] | None, Field(description="Limit this scan to these database schemas.")] = None,
+            profile: Annotated[bool, Field(description="Sample rows to profile columns and verify inferred joins.")] = True,
             tables: Annotated[list[str] | None, Field(description=TABLES_ARG + " Applies to this scan only.")] = None,
         ) -> dict[str, Any]:
-            """Re-read a registered database: tables, columns, declared keys, column profiles (samples,
-            uniqueness, formats, small value sets) and undeclared keys inferred by name and
-            confirmed by value containment. Use it after the schema changed or to refresh
-            profiles; add_datasource already scans once. Terms, reviewed relationships and SQL
-            attributes are kept; inferred relationships that lost their evidence are removed.
-            Reports new tables and columns added to modeled tables; get_modeling_worklist returns
-            both. Reads the database only."""
+            """Re-read a registered database's tables, columns, declared keys, column profiles (samples, uniqueness, formats, small value sets), and name-inferred joins verified by value containment. Use after schema changes or to refresh stale profiles; use add_datasource for new databases and get_modeling_worklist to inspect unmodeled tables afterwards. Connects read-only to the database, preserves existing Terms, reviewed relationships, and SQL attributes, refreshes unreviewed inferred joins, and returns counts of newly discovered tables and columns."""
             return svc.scan_datasource(datasource, schemas, profile, tables)
 
     # ------------------------------------------------------------- modeling
-    @tool(READ)
+    @tool(READ, title="Get unmodeled tables worklist")
     def get_modeling_worklist(
         datasource: DatasourceArg = None,
-        limit: Annotated[int, Field(description="Tables to return (1-10).")] = 3,
-        tables: Annotated[list[str] | None, Field(description="Specific tables to (re)model instead of the next pending ones.")] = None,
+        limit: Annotated[int, Field(ge=1, le=10, description="Maximum unmodeled or updated tables to return (1-10).")] = 3,
+        tables: Annotated[list[str] | None, Field(description="Specific table names to model or re-model instead of the next pending batch.")] = None,
     ) -> dict[str, Any]:
-        """Return the next tables that still have no business Terms, with what you need to name them: candidate
-        columns (types, samples, uniqueness, formats), foreign keys and the Terms they point to, and
-        the modeling rules. Use it while building an ontology over a database; call save_table_terms
-        once per returned table and repeat until remaining is 0. After a re-scan it also returns
-        modeled tables that gained columns, with new_columns and current_terms: send current_terms
-        back with each new column added to its Term. For the personal knowledge store use
-        define_entity instead. Read-only."""
+        """Fetch the next batch of unmodeled database tables (or modeled tables with newly scanned columns), including candidate column profiles, foreign keys, linked Terms, and modeling rules. Use while building an ontology over a SQL database, paired with save_table_terms until remaining is 0; use define_entity for personal knowledge entities and describe_table to inspect one table without modeling rules. Returns tables, remaining count, and current_terms for tables with new columns."""
         return svc.get_modeling_worklist(datasource, limit, tables)
 
-    @tool(WRITE)
+    @tool(WRITE_DESTRUCTIVE, title="Save business Terms for a table")
     def save_table_terms(
-        table: Annotated[str, Field(description="Table name, schema-qualified if needed (e.g. 'sales.orders').")],
-        terms: Annotated[list[TermInput], Field(description="Usually exactly one Term per table.")],
+        table: Annotated[str, Field(description="Physical table name, schema-qualified if needed (e.g. 'sales.orders').")],
+        terms: Annotated[list[TermInput], Field(description="Proposed business Terms for this table (usually exactly one Term per table).")],
         column_descriptions: Annotated[
-            dict[str, str] | None, Field(description="Optional {column: one-sentence description} for non-obvious columns.")
+            dict[str, str] | None, Field(description="Optional {column: one-sentence description} map for non-obvious columns.")
         ] = None,
         is_junction: Annotated[
-            bool | None, Field(description="True if each row only associates two or more entities (bridge table).")
+            bool | None, Field(description="Set true only when each row solely associates two or more entities (bridge table).")
         ] = None,
         datasource: DatasourceArg = None,
     ) -> dict[str, Any]:
-        """Save the Terms you propose for one database table and map its columns to them. Use it for tables
-        returned by get_modeling_worklist; use update_term to edit a single Term afterwards. It
-        replaces the table's previous Terms: same-named Terms are updated, others are removed unless
-        they own SQL attributes. Unassigned candidate columns go to the first Term. Nothing is saved
-        if a column is unknown, assigned twice, or a name clashes with another table's Term; the
-        error lists every problem. New Terms are drafts."""
+        """Save business Terms and column mappings for one scanned database table. Use for tables returned by get_modeling_worklist; use update_term to tweak a single existing Term, define_entity for knowledge store tables, and save_concept for prose definitions. Replaces the table's previous Terms (same-named Terms update; unreferenced Terms without SQL attributes are removed; unassigned candidate columns attach to the first Term). Validates atomically so unknown columns, duplicates, or cross-table name clashes save nothing and return every error. New Terms start as draft."""
         return svc.save_table_terms(table, [t.model_dump() for t in terms], column_descriptions, is_junction, datasource)
 
-    @tool(READ)
+    @tool(READ, title="List table join relationships")
     def list_relationships(
-        status: Annotated[Literal["proposed", "accepted", "rejected", "all"], Field(description="Which relationships to list.")] = "proposed",
-        table: Annotated[str | None, Field(description="Only relationships touching this table.")] = None,
+        status: Annotated[
+            Literal["proposed", "accepted", "rejected", "all"],
+            Field(description="Filter joins by review status: 'proposed', 'accepted', 'rejected', or 'all'."),
+        ] = "proposed",
+        table: Annotated[str | None, Field(description="Restrict results to relationships touching this table.")] = None,
         datasource: DatasourceArg = None,
     ) -> dict[str, Any]:
-        """List joins between tables with their evidence (declared, inferred with name score and value
-        containment, or added manually), plus multi-role joins, identifier columns with no
-        relationship, and joins used by executed queries that are not relationships yet. Use it to
-        review the join graph before modeling or when a join looks wrong; act on it with
-        set_relationship. Use find_join_path for the route between two Terms. Read-only."""
+        """List table join relationships with their evidence (declared FK, inferred name/containment scores, or manual), plus multi-role joins, unlinked identifier columns, and ad-hoc query joins not yet recorded. Use to audit the join graph before or during modeling and act with set_relationship; use find_join_path to get the shortest join route between two Terms. Returns grouped relationships, role notes, and review rules."""
         return svc.list_relationships(datasource, status, table)
 
-    @tool(WRITE_DESTRUCTIVE)
+    @tool(WRITE_DESTRUCTIVE, title="Update a table join relationship")
     def set_relationship(
-        action: Annotated[Literal["accept", "reject", "add", "update", "delete"], Field(description="What to do.")],
-        relationship_id: Annotated[str | None, Field(description="Id from list_relationships (or give source and target).")] = None,
-        source: Annotated[str | None, Field(description="Foreign-key side, 'table.column'.")] = None,
-        target: Annotated[str | None, Field(description="Referenced key, 'table.column'.")] = None,
-        role: Annotated[str | None, Field(description="Business role when several columns reference the same table, e.g. 'billing'.")] = None,
-        description: Annotated[str | None, Field(description="What the relationship means.")] = None,
-        is_default: Annotated[bool | None, Field(description="Make this the default join between the two tables.")] = None,
+        action: Annotated[
+            Literal["accept", "reject", "add", "update", "delete"],
+            Field(description="Operation to perform: accept or reject a proposed join, add a missing one, update metadata/default flag, or delete permanently."),
+        ],
+        relationship_id: Annotated[str | None, Field(description="Relationship id from list_relationships (alternative to passing source and target).")] = None,
+        source: Annotated[str | None, Field(description="Foreign-key column formatted as 'table.column' (used with target when adding or without relationship_id).")] = None,
+        target: Annotated[str | None, Field(description="Referenced key column formatted as 'table.column' (used with source).")] = None,
+        role: Annotated[str | None, Field(description="Business role when multiple columns reference the same table, e.g. 'billing'.")] = None,
+        description: Annotated[str | None, Field(description="Business meaning of this join relationship.")] = None,
+        is_default: Annotated[bool | None, Field(description="Set true to mark this join as the default path between its two tables.")] = None,
         datasource: DatasourceArg = None,
     ) -> dict[str, Any]:
-        """Change one join between two columns: accept or reject a proposed one, add a missing one, update its
-        role, description or default flag, or delete it. Use it after list_relationships. Identify
-        it by relationship_id or by source and target ('table.column'). Reviewed relationships
-        survive re-scans; only accepted ones are used for join paths. delete removes it permanently;
-        rejecting keeps the decision instead. Fails if the columns or relationship do not exist."""
+        """Modify one join relationship between two table columns: accept or reject a proposed join, add a missing one, update its role/description/default flag, or delete it permanently. Use after reviewing joins in list_relationships; use find_join_path to inspect active routes instead. Identify the join by relationship_id or by source and target ('table.column'). Only accepted joins enter join paths and survive re-scans; action='delete' removes the record permanently while 'reject' preserves the negative decision. Fails if the columns or relationship do not exist."""
         return svc.set_relationship(action, relationship_id, source, target, role, description, is_default, datasource)
 
-    @tool(READ)
+    @tool(READ, title="Suggest reusable SQL attributes")
     def suggest_sql_attributes(
-        term: Annotated[str | None, Field(description="Limit to one Term.")] = None,
-        limit: Annotated[int, Field(description="Maximum candidates.")] = 15,
+        term: Annotated[str | None, Field(description="Restrict candidate mining to one Term name, synonym, or id.")] = None,
+        limit: Annotated[int, Field(ge=1, description="Maximum candidate SQL attributes to return (>= 1).")] = 15,
         datasource: DatasourceArg = None,
     ) -> dict[str, Any]:
-        """Return candidate SQL attributes (reusable measures, filters and join patterns) mined from queries
-        run through this server, verified examples, bridge tables and column profiles, with the
-        rules for judging them. Use it after Terms exist; save the worthwhile ones with
-        save_sql_attribute and ignore the rest. Read-only."""
+        """Mine candidate reusable SQL attributes (measures, filters, dimensions, and join patterns) from executed queries, verified examples, bridge tables, and column profiles, alongside promotion rules. Use after Terms are modeled and persist worthwhile candidates with save_sql_attribute; use get_term to inspect attributes already saved on a Term. Returns candidates and a more_available count."""
         return svc.suggest_sql_attributes(datasource, term, limit)
 
-    @tool(WRITE_DESTRUCTIVE)
+    @tool(WRITE_DB_DESTRUCTIVE, title="Save or delete a SQL attribute")
     def save_sql_attribute(
-        term: Annotated[str, Field(description="Owning Term name.")],
-        name: Annotated[str, Field(description="Title Case name, e.g. 'Net Revenue'.")],
+        term: Annotated[str, Field(description="Owning Term name, synonym, or id.")],
+        name: Annotated[str, Field(description="Title Case attribute name, e.g. 'Net Revenue'.")],
         expression: Annotated[
             str | None,
             Field(
@@ -304,401 +284,319 @@ def build_server(settings: Settings | None = None, service: OntologyService | No
                 "table qualified by the bare table name (SUM(order_lines.line_total)). join/query: a full SELECT."
             ),
         ] = None,
-        description: Annotated[str | None, Field(description="What it captures and when to use it.")] = None,
-        kind: Annotated[Literal["measure", "filter", "dimension", "join", "query"], Field(description="Type of expression.")] = "measure",
-        status: Annotated[Literal["draft", "certified", "deprecated"] | None, Field(description="Set certified only when a person approved it.")] = None,
-        delete: Annotated[bool, Field(description="Delete this SQL attribute.")] = False,
+        description: Annotated[str | None, Field(description="Business meaning of the expression and when to use it.")] = None,
+        kind: Annotated[
+            Literal["measure", "filter", "dimension", "join", "query"],
+            Field(description="Expression category: 'measure', 'filter', or 'dimension' for single-table fragments; 'join' or 'query' for full SELECT statements."),
+        ] = "measure",
+        status: Annotated[Literal["draft", "certified", "deprecated"] | None, Field(description="Set 'certified' only after explicit user approval.")] = None,
+        delete: Annotated[bool, Field(description="Set true to permanently delete this SQL attribute.")] = False,
         datasource: DatasourceArg = None,
     ) -> dict[str, Any]:
-        """Create, update, certify or delete a named SQL expression under a Term. Before saving, the expression
-        is run read-only against the database (a fragment over the Term's table, or a full SELECT
-        for join/query kinds); if the database rejects it, nothing is saved and the error is
-        returned. Changing a certified attribute's expression returns it to draft. delete=true
-        removes it permanently. Use suggest_sql_attributes to find candidates."""
+        """Create, update, certify, or permanently delete a named SQL expression attached to a Term. Use to persist candidates from suggest_sql_attributes or reusable business metrics; use save_example_query for full question-and-SQL pairs and update_term for Term definitions. Probes the expression read-only against the database before saving and rejects broken SQL without saving. Editing a certified attribute's expression resets it to draft; delete=true removes it permanently."""
         return svc.save_sql_attribute(term, name, expression, description, kind, status, delete, datasource)
 
-    @tool(WRITE_DESTRUCTIVE)
+    @tool(WRITE_DESTRUCTIVE, title="Edit, certify, or delete a Term")
     def update_term(
-        term: Annotated[str, Field(description="Term name, synonym or id.")],
-        name: Annotated[str | None, Field(description="New name.")] = None,
-        description: Annotated[str | None, Field(description="New description.")] = None,
-        synonyms: Annotated[list[str] | None, Field(description="Replace all synonyms.")] = None,
-        add_synonyms: Annotated[list[str] | None, Field(description="Add synonyms, e.g. the user's own words or translations.")] = None,
+        term: Annotated[str, Field(description="Existing Term name, synonym, or id.")],
+        name: Annotated[str | None, Field(description="Replacement business Term name with spaces; omit to keep current name.")] = None,
+        description: Annotated[str | None, Field(description="Replacement one-to-two sentence business definition; omit to keep current definition.")] = None,
+        synonyms: Annotated[list[str] | None, Field(description="Complete synonym list replacing all existing synonyms.")] = None,
+        add_synonyms: Annotated[list[str] | None, Field(description="Additional synonyms to append, e.g. user vocabulary or translations.")] = None,
         status: Annotated[
             Literal["draft", "certified", "deprecated"] | None,
-            Field(description="certified = a person confirmed this definition. Do not certify on your own."),
+            Field(description="Approval state; pass 'certified' only when a person explicitly confirmed the definition."),
         ] = None,
-        note: Annotated[str | None, Field(description="Reviewer note.")] = None,
-        column_updates: Annotated[list[ColumnUpdate] | None, Field(description="Rename or describe mapped columns.")] = None,
-        delete: Annotated[bool, Field(description="Delete the Term with its column mappings and SQL attributes.")] = False,
+        note: Annotated[str | None, Field(description="Reviewer note explaining the change or certification.")] = None,
+        column_updates: Annotated[list[ColumnUpdate] | None, Field(description="Updates to display names or descriptions of mapped columns.")] = None,
+        delete: Annotated[bool, Field(description="Set true to permanently delete this Term, its column mappings, SQL attributes, and relations.")] = False,
         datasource: DatasourceArg = None,
     ) -> dict[str, Any]:
-        """Edit one existing Term: rename it, change its description or synonyms, rename or describe its mapped
-        columns, set its status, or delete it. Use add_synonyms to record the user's own words so
-        searches match them. Changing a certified Term's name or description returns it to draft
-        unless you also pass status; only certify what the user confirmed. delete=true removes the
-        Term with its column mappings, SQL attributes and relations and cannot be undone; knowledge
-        entities must be deleted with define_entity. For concept bodies and relations use
-        save_concept."""
+        """Edit metadata, synonyms, column labels, or approval status of one existing Term, or delete it permanently. Use for targeted edits after modeling or to add user synonyms; use save_table_terms to remodel all Terms on a table, save_concept for concept markdown bodies and typed relations, save_glossary for abbreviations, and define_entity(delete=true) to drop knowledge entities. Editing a certified Term's name or description resets it to draft unless status is also passed; delete=true permanently removes the Term, its mappings, SQL attributes, and relations."""
         updates = [c.model_dump() for c in column_updates] if column_updates else None
         return svc.update_term(term, name, description, synonyms, add_synonyms, status, note, updates, delete, datasource)
 
-    @tool(WRITE)
+    @tool(WRITE_DESTRUCTIVE, title="Save or delete glossary entries")
     def save_glossary(
-        entries: Annotated[list[GlossaryEntry] | None, Field(description="Entries to add or update.")] = None,
-        delete: Annotated[list[str] | None, Field(description="Entry names to delete.")] = None,
-        global_scope: Annotated[bool, Field(description="Store for all datasources instead of one.")] = False,
+        entries: Annotated[list[GlossaryEntry] | None, Field(description="Glossary abbreviation/jargon entries to create or update.")] = None,
+        delete: Annotated[list[str] | None, Field(description="Exact entry names to permanently delete from the selected scope.")] = None,
+        global_scope: Annotated[bool, Field(description="Set true to store or delete entries across all datasources instead of one datasource.")] = False,
         datasource: DatasourceArg = None,
     ) -> dict[str, Any]:
-        """Add, update or delete glossary entries for abbreviations and jargon (MRR → monthly recurring
-        revenue), per datasource or global. Entries are searched like Terms and returned by
-        get_query_context. Use it for words to expand, not for business definitions with columns,
-        which are Terms. Deleted entries are gone."""
+        """Create, update, or permanently delete glossary entries mapping abbreviations and internal jargon (e.g. MRR to monthly recurring revenue) in either one datasource or global scope. Use for shorthand expansions that feed search_ontology and get_query_context; use update_term or save_table_terms for column-backed business Terms and save_concept for longer explanations. Same-named entries upsert in place; names passed in delete are permanently removed from the chosen scope."""
         payload = [e.model_dump() for e in entries] if entries else None
         return svc.save_glossary(payload, delete, datasource, global_scope)
 
     # ------------------------------------------------------- knowledge store
-    @tool(WRITE_DESTRUCTIVE, title="Define or change an entity", description=DEFINE_ENTITY_DESCRIPTION)
+    @tool(WRITE_DESTRUCTIVE, title="Define, alter, or delete a knowledge entity", description=DEFINE_ENTITY_DESCRIPTION)
     def define_entity(
-        name: Annotated[str, Field(description="Entity (Term) name, singular, e.g. 'Receipt', 'Book', '운동 기록'.")],
-        columns: Annotated[list[EntityColumn] | None, Field(description="Columns to create or add. Existing columns keep their type.")] = None,
-        description: Annotated[str | None, Field(description="What one record is.")] = None,
-        table: Annotated[str | None, Field(description="snake_case table name; required when the name is not English.")] = None,
-        keys: Annotated[list[str] | None, Field(description="Columns that identify a record (e.g. ['isbn']); re-adding updates it.")] = None,
-        synonyms: Annotated[list[str] | None, Field(description="Other names, e.g. the user's language.")] = None,
-        delete: Annotated[bool, Field(description="Delete the entity (and, with force, its records).")] = False,
-        force: Annotated[bool, Field(description="Allow deleting an entity that still has records.")] = False,
+        name: Annotated[str, Field(description="Singular entity (Term) name, e.g. 'Receipt', 'Book', or '운동 기록'.")],
+        columns: Annotated[list[EntityColumn] | None, Field(description="Columns to create or append; existing column types cannot be changed.")] = None,
+        description: Annotated[str | None, Field(description="One-sentence definition of what one record represents.")] = None,
+        table: Annotated[str | None, Field(description="snake_case SQLite table name; required when name is not English.")] = None,
+        keys: Annotated[list[str] | None, Field(description="Natural-key column names (e.g. ['isbn']) used to upsert matching rows in add_records.")] = None,
+        synonyms: Annotated[list[str] | None, Field(description="Alternate names or translations for this entity.")] = None,
+        delete: Annotated[bool, Field(description="Set true to drop the entity (fails while rows exist unless force=true).")] = False,
+        force: Annotated[bool, Field(description="Set true with delete=true to permanently delete the entity and all of its records.")] = False,
     ) -> dict[str, Any]:
         cols = [c.model_dump() for c in columns] if columns else None
         return svc.knowledge.define_entity(name, cols, description, table, keys, synonyms, delete, force)
 
-    @tool(WRITE, title="Add knowledge records")
+    @tool(WRITE, title="Insert or upsert knowledge records")
     def add_records(
-        entity: Annotated[str, Field(description="Entity name, e.g. 'Receipt'.")],
+        entity: Annotated[str, Field(description="Existing knowledge entity (Term) name, e.g. 'Receipt'.")],
         records: Annotated[
             list[dict[str, Any]],
             Field(
-                description="Objects of column values. Strings like '12,000원' or '2026/10/03' are normalized. Ref columns accept "
-                "an id, a name (created when missing) or an object. Optional per record: id (update that row), _locator, "
-                "_evidence, _note, _source."
+                description="List of record objects mapping column names to values. Strings like '12,000원' or '2026/10/03' are normalized; "
+                "ref columns accept an id, name (auto-created when create_missing_refs=true), or object. Optional per record: id (update row), _locator, _evidence, _note, _source."
             ),
         ],
         source: SourceArg = None,
-        on_conflict: Annotated[Literal["update", "skip", "error"], Field(description="When a record matches an existing one by keys (or is identical).")] = "update",
-        create_missing_refs: Annotated[bool, Field(description="Create referenced records (a new merchant, author) by name.")] = True,
+        on_conflict: Annotated[
+            Literal["update", "skip", "error"],
+            Field(description="Conflict policy when a record matches an existing row by natural keys or identical values: 'update', 'skip', or 'error'."),
+        ] = "update",
+        create_missing_refs: Annotated[bool, Field(description="Set true to auto-create referenced entity rows (e.g. a new merchant or author) by name.")] = True,
     ) -> dict[str, Any]:
-        """Store records in a knowledge entity (from receipts, statements, notes, logs the user shared), each
-        with its source, locator and supporting quote. The whole batch is validated first: values
-        are normalized ('12,000원' → 12000, '2026/10/03' → 2026-10-03), references resolved by id or
-        name (missing ones created), and if any record is invalid nothing is written and every
-        problem is listed. Records matching an existing one by key, or identical ones, update or are
-        skipped instead of duplicating. Use edit_records to change records by id."""
+        """Insert or upsert structured records into an existing knowledge entity with source provenance, locators, and supporting quotes. Use after define_entity for countable facts; use edit_records to update or delete existing rows by id, save_concept for prose explanations, and save_passages for searchable document excerpts. Validates the entire batch atomically (normalizing currency/dates and resolving refs) so any invalid record aborts the write and returns all errors. Returns inserted, updated, and skipped ids."""
         src = source.model_dump(exclude_none=True) if isinstance(source, SourceInput) else source
         return svc.knowledge.add_records(entity, records, src, on_conflict, create_missing_refs)
 
-    @tool(WRITE_DESTRUCTIVE, title="Update or delete knowledge records")
+    @tool(WRITE_DESTRUCTIVE, title="Update or delete knowledge records by ID")
     def edit_records(
-        entity: Annotated[str, Field(description="Entity name.")],
-        action: Annotated[Literal["update", "delete"], Field(description="What to do with the records.")],
-        ids: Annotated[list[int], Field(description="Record ids (find them with run_sql or get_source).")],
-        values: Annotated[dict[str, Any] | None, Field(description="For update: column values to set; may include _locator, _evidence, _note.")] = None,
+        entity: Annotated[str, Field(description="Knowledge entity (Term) name whose records to modify, e.g. 'Receipt'.")],
+        action: Annotated[
+            Literal["update", "delete"],
+            Field(description="Operation to perform on the specified record ids: 'update' fields or 'delete' permanently."),
+        ],
+        ids: Annotated[list[int], Field(description="Integer record ids to modify (find them with run_sql or get_source).")],
+        values: Annotated[dict[str, Any] | None, Field(description="For action='update': column values to set; may include _locator, _evidence, and _note.")] = None,
         source: SourceArg = None,
     ) -> dict[str, Any]:
-        """Update or delete knowledge records by id (find ids with run_sql or get_source). update sets the
-        given columns and provenance fields. delete is permanent and is refused while other records
-        reference the rows; confirm with the user first. Use add_records to insert new records and
-        define_entity to change columns."""
+        """Update specific fields or permanently delete existing knowledge entity records by integer id. Use after locating row ids with run_sql or get_source; use add_records to insert or upsert new rows and define_entity to alter columns or drop the whole entity. action='update' modifies only the supplied columns and provenance fields; action='delete' is permanent, requires user confirmation, and fails if other records reference any target row."""
         src = source.model_dump(exclude_none=True) if isinstance(source, SourceInput) else source
         return svc.knowledge.edit_records(entity, action, ids, values, src)
 
-    @tool(WRITE, title="Save a concept")
+    @tool(WRITE, title="Create or update a knowledge concept")
     def save_concept(
-        name: Annotated[str, Field(description="Concept (Term) name, e.g. 'Spaced Repetition'. Any language.")],
-        description: Annotated[str | None, Field(description="One-sentence definition.")] = None,
-        body: Annotated[str | None, Field(description="Markdown page that replaces the current body: what it is, how it works, examples, open questions.")] = None,
-        append_body: Annotated[str | None, Field(description="Markdown appended to the current body (new notes, a new source's view).")] = None,
-        synonyms: Annotated[list[str] | None, Field(description="Other names to add.")] = None,
-        relations: Annotated[list[RelationInput] | None, Field(description="Typed links to other Terms.")] = None,
-        remove_relations: Annotated[list[RelationRef] | None, Field(description="Links to remove.")] = None,
+        name: Annotated[str, Field(description="Concept (Term) name in any language, e.g. 'Spaced Repetition'.")],
+        description: Annotated[str | None, Field(description="One-sentence business or conceptual definition.")] = None,
+        body: Annotated[str | None, Field(description="Markdown wiki body replacing the current body: overview, mechanics, examples, open questions.")] = None,
+        append_body: Annotated[str | None, Field(description="Markdown section appended to the current body without replacing existing text.")] = None,
+        synonyms: Annotated[list[str] | None, Field(description="Additional synonyms to append to this concept.")] = None,
+        relations: Annotated[list[RelationInput] | None, Field(description="Typed directed links from this concept to other Terms.")] = None,
+        remove_relations: Annotated[list[RelationRef] | None, Field(description="Existing typed links to unlink from this concept.")] = None,
         source: SourceArg = None,
-        locator: Annotated[str | None, Field(description="Where in the source (page, chapter, timestamp).")] = None,
-        evidence: Annotated[str | None, Field(description="Supporting quote.")] = None,
-        status: Annotated[Literal["draft", "certified", "deprecated"] | None, Field(description="Certify only when the user confirms.")] = None,
-        datasource: Annotated[str | None, Field(description="Defaults to the knowledge store; pass another datasource to document its Terms.")] = None,
+        locator: Annotated[str | None, Field(description="Location in the source (page, chapter, heading, or timestamp).")] = None,
+        evidence: Annotated[str | None, Field(description="Supporting quote from the source.")] = None,
+        status: Annotated[Literal["draft", "certified", "deprecated"] | None, Field(description="Set 'certified' only when the user explicitly confirms.")] = None,
+        datasource: Annotated[str | None, Field(description="Target datasource; defaults to 'knowledge', or pass a database datasource to document its Terms.")] = None,
     ) -> dict[str, Any]:
-        """Create or update a concept: a Term with a one-line definition, a markdown body (a wiki page) and
-        typed relations (is_a, part_of, related_to, ...) to other Terms, with its source. Use it for
-        ideas and explanations; use define_entity and add_records for countable facts. Also works on
-        existing entity Terms to explain them. body replaces the page and append_body adds to it;
-        relation targets that do not exist yet are created as empty concepts. Changing a certified
-        concept's meaning returns it to draft."""
+        """Create or update a concept Term with a one-sentence definition, markdown wiki body, typed relations, and source provenance. Use for ideas, frameworks, or documenting existing entity Terms; use define_entity and add_records for countable facts, save_passages for document excerpts, and update_term(delete=true) to delete a Term. body replaces existing prose while append_body adds to it; missing relation targets are created as empty stub concepts. Editing a certified concept resets its status to draft."""
         src = source.model_dump(exclude_none=True) if isinstance(source, SourceInput) else source
         rels = [r.model_dump() for r in relations] if relations else None
         removes = [r.model_dump() for r in remove_relations] if remove_relations else None
         return svc.knowledge.save_concept(name, description, body, append_body, synonyms, rels, removes, src, locator, evidence, status, datasource)
 
-    @tool(WRITE_DESTRUCTIVE, title="Save passages of a source")
+    @tool(WRITE_DESTRUCTIVE, title="Save or replace source passages")
     def save_passages(
-        passages: Annotated[list[PassageInput] | None, Field(description="Excerpts or section summaries to save.")] = None,
+        passages: Annotated[list[PassageInput] | None, Field(description="Excerpts or section summaries to insert or update (up to 200 per call).")] = None,
         source: SourceArg = None,
-        delete_ids: Annotated[list[int] | None, Field(description="Passage ids to delete (permanent; confirm with the user first).")] = None,
+        delete_ids: Annotated[list[int] | None, Field(description="Passage ids to permanently delete (confirm with the user first).")] = None,
         replace: Annotated[
             bool,
-            Field(description="True when the source document changed and you read all of it again: passages is then its complete set, and its other passages are deleted (listed in deleted)."),
+            Field(description="Set true when re-ingesting a revised source: passages becomes the complete set and unmentioned passages of that source are permanently deleted."),
         ] = False,
     ) -> dict[str, Any]:
-        """Save excerpts and section summaries of one source (an article, paper, book chapter, meeting
-        note) so they can be searched with search_text and cited, each with its heading or locator in
-        the original and the Terms it is about. The full original stays in the Obsidian vault: point
-        the source at a note already there (source.original), or pass source.original_text or
-        source.original_file to keep it there. Keep one idea per passage. A passage with the same text
-        from the same source updates instead of duplicating; delete_ids removes passages. When the
-        document changed, save the source again (same uri or id) with the new original and call this
-        with replace=true and every passage of the new version: unchanged passages keep their ids, and
-        get_source shows the records and concepts to check next. Use add_records for countable facts
-        and save_concept for definitions."""
+        """Store, update, replace, or delete searchable excerpts and section summaries for one source document, linked to Terms and an Obsidian vault original. Use for articles, papers, books, or notes you want searchable via search_text; use add_records for structured facts and save_concept for concept definitions. Identical text from the same source updates in place; replace=true requires source and passages and permanently prunes stale passages; delete_ids permanently removes specified passages. Returns inserted, updated, unchanged, deleted ids, and any stub concepts created."""
         src = source.model_dump(exclude_none=True) if isinstance(source, SourceInput) else source
         items = [x.model_dump(exclude_none=True) for x in passages] if passages else None
         return svc.knowledge.save_passages(items, src, delete_ids, replace)
 
-    @tool(READ, title="Full-text search")
+    @tool(READ, title="Full-text search in the knowledge store")
     def search_text(
-        query: Annotated[str, Field(description="Words to find, as written in the sources (any language).")],
-        kinds: Annotated[list[Literal["passage", "term", "source"]] | None, Field(description="Restrict to passages, Term bodies or sources.")] = None,
-        source: Annotated[int | None, Field(description="Only this source id.")] = None,
-        term: Annotated[str | None, Field(description="Only passages linked to this Term.")] = None,
-        limit: Annotated[int, Field(description="Maximum hits (max 50).")] = 10,
+        query: Annotated[str, Field(description="Words to search for as written in sources, passages, or Term bodies (any language).")],
+        kinds: Annotated[
+            list[Literal["passage", "term", "source"]] | None,
+            Field(description="Restrict hits to 'passage', 'term', or 'source' (default: all three)."),
+        ] = None,
+        source: Annotated[int | None, Field(ge=1, description="Restrict results to passages belonging to this integer source id.")] = None,
+        term: Annotated[str | None, Field(description="Restrict results to passages linked to this Term name.")] = None,
+        limit: Annotated[int, Field(ge=1, le=50, description="Maximum ranked hits to return (1-50).")] = 10,
     ) -> dict[str, Any]:
-        """Search the text of the knowledge store: passages, Term definitions and bodies, and sources.
-        Returns ranked hits (bm25) with the matching words in [brackets], the heading or locator, the
-        Terms each passage is about and a [[link]] to the original in Obsidian. Words match with their
-        Korean particles (기억 finds 기억을) and inside compounds. Also returns the FTS query and a SQL
-        example, so you can combine the search with records, relations and sources in one run_sql:
-        passages_fts MATCH ... joined to passages, passage_terms, terms, term_relations and sources.
-        Read-only."""
+        """Run BM25 full-text and compound-substring search across knowledge store passages, Term bodies, and sources. Use when searching inside stored prose or quotes; use search_ontology to search structured schema catalogs across any datasource, and get_source to inspect everything from one source. Strips Korean particles and falls back to any-word matching when all-word matching yields no hits. Returns ranked snippets with [matched] terms, Obsidian [[links]], fts_query, and a runnable SQL example."""
         return svc.knowledge.search_text(query, list(kinds) if kinds else None, limit, source, term)
 
-    @tool(READ, title="Show a source")
+    @tool(READ, title="Inspect a knowledge source and provenance")
     def get_source(
-        source: Annotated[str, Field(description="Source id (e.g. '3' or 'source:3') or part of its title.")],
+        source: Annotated[str, Field(description="Source id (e.g. '3' or 'source:3') or a substring of its title.")],
     ) -> dict[str, Any]:
-        """Show one source (by id or part of its title) with its summary, content and the path of its
-        original in the Obsidian vault, and everything stored from it: records per entity, concepts,
-        relations and passages. Use it to cite where an answer came from or to review what a document
-        contributed; use search_text to find sources by their words. Read-only."""
+        """Retrieve one knowledge source by id or title substring together with its Obsidian original path and every item derived from it (entity records, concepts, relations, and passages). Use to cite provenance or audit what a document contributed; use search_text to find sources by content and describe_table for physical database tables. Fails if no source matches or multiple titles match ambiguously."""
         return svc.knowledge.get_source(source)
 
-    @tool(READ, title="Index of Terms")
+    @tool(READ, title="List Terms in a datasource")
     def list_terms(
-        kind: Annotated[Literal["all", "entity", "concept"], Field(description="Which Terms to list.")] = "all",
-        status: Annotated[Literal["draft", "certified", "deprecated"] | None, Field(description="Only Terms with this status.")] = None,
-        limit: Annotated[int, Field(description="Page size (max 500).")] = 200,
-        offset: Annotated[int, Field(description="Page offset.")] = 0,
+        kind: Annotated[
+            Literal["all", "entity", "concept"],
+            Field(description="Filter Terms by kind: 'all', 'entity' (table-backed records), or 'concept' (markdown definitions)."),
+        ] = "all",
+        status: Annotated[Literal["draft", "certified", "deprecated"] | None, Field(description="Filter to Terms with this approval status.")] = None,
+        limit: Annotated[int, Field(ge=1, le=500, description="Maximum Terms per page (1-500).")] = 200,
+        offset: Annotated[int, Field(ge=0, description="Zero-based pagination offset (>= 0).")] = 0,
         datasource: DatasourceArg = None,
     ) -> dict[str, Any]:
-        """List every Term of a datasource (the index): entities and concepts with their one-line definition,
-        status, synonyms, record and relation counts, and which concepts are still empty. Use it to
-        browse or before adding knowledge, to reuse Terms instead of creating near-duplicates; use
-        search_ontology to find Terms by words and get_term for one Term's full detail. Read-only."""
+        """List a paginated index of every Term (entities and concepts) in one datasource with one-line definitions, status, synonyms, record/relation counts, and empty-stub flags. Use to browse the catalog or check existing Terms before creating new ones; use search_ontology for keyword search and get_term for one Term's complete details. Returns total count, offset, and paged term summaries."""
         return svc.list_terms(datasource, kind, status, limit, offset)
 
-    @tool(READ, title="Recent changes")
-    def recent_changes(limit: Annotated[int, Field(description="How many entries, newest first.")] = 30) -> dict[str, Any]:
-        """List recent changes across the ontology and knowledge store (the log), newest first: Terms, records,
-        concepts, relationships and SQL attributes added, changed, certified or deleted. Use it to
-        answer 'what did I add lately' or to review a session's work. Read-only."""
+    @tool(READ, title="List recent ontology and knowledge changes")
+    def recent_changes(
+        limit: Annotated[int, Field(ge=1, le=500, description="Maximum changelog entries to return, newest first (1-500).")] = 30,
+    ) -> dict[str, Any]:
+        """Return the newest changelog entries across all datasources and the personal knowledge store, recording Terms, records, concepts, relationships, passages, and SQL attributes added, updated, certified, or deleted. Use to review recent session activity or answer 'what changed lately'; use check_readiness for current aggregate counts and get_term for a Term's current state. Returns up to limit entries ordered newest first with timestamps and action details."""
         return svc.recent_changes(limit)
 
-    @tool(WRITE, title="Export as an Obsidian vault")
+    @tool(WRITE, title="Export ontology as an Obsidian vault")
     def export_wiki(datasource: DatasourceArg = None) -> dict[str, Any]:
-        """Write the ontology (by default the knowledge store) as Obsidian pages: one page per Term with
-        synonyms as aliases, relations as [[links]] and its passages, one per source with a link to
-        the original and its passages, plus index.md and log.md. The knowledge store goes to the
-        vault (AUTO_ONTOLOGY_VAULT/auto-ontology, or ~/.auto-ontology-mcp/wiki/knowledge), other
-        datasources to ~/.auto-ontology-mcp/wiki/<datasource>. Re-exporting rewrites and prunes only
-        pages it generated; originals and other files are never touched. Edits made in Obsidian are
-        not read back. Use export_ontology for a single YAML/JSON document."""
+        """Generate an Obsidian-compatible markdown vault for one datasource (defaulting to the knowledge store): one page per Term with synonym aliases, [[links]], and passages, one per source, plus index.md and log.md. Use to browse or inspect the knowledge graph in Obsidian; use export_ontology to serialize the semantic layer as a single portable YAML/JSON file. Writes into AUTO_ONTOLOGY_VAULT/auto-ontology (or ~/.auto-ontology-mcp/wiki/<datasource>), prunes only previously generated pages, never alters originals, and is strictly one-way (Obsidian edits are not read back)."""
         return svc.export_wiki(datasource)
 
     # -------------------------------------------------------------- reading
-    @tool(READ)
+    @tool(READ, title="Search ontology catalog by keyword")
     def search_ontology(
-        query: Annotated[str, Field(description="Words to look for: a business noun, metric, column or value.")],
+        query: Annotated[str, Field(description="Lexical keywords to match: a business noun, metric, column name, or stored value.")],
         kinds: Annotated[
             list[Literal["term", "attribute", "sql_attribute", "glossary", "table", "example", "source", "value"]] | None,
-            Field(description="Restrict result kinds."),
+            Field(description="Restrict matches to specific catalog object kinds (default: all kinds)."),
         ] = None,
-        limit: Annotated[int, Field(description="Maximum hits.")] = 10,
+        limit: Annotated[int, Field(ge=1, le=50, description="Maximum ranked hits to return (1-50).")] = 10,
         datasource: DatasourceArg = None,
     ) -> dict[str, Any]:
-        """Find Terms, concepts (including their bodies and relations), mapped columns, SQL attributes,
-        glossary entries, verified example questions, sources and unmodeled tables by words. In the
-        knowledge store it also matches records by their stored text ('value' hits) and adds the top
-        full-text hits from passages, bodies and sources ('text_hits'). Use it to locate things by name
-        or topic; use search_text to search the text itself, list_terms to browse everything and
-        get_term for full detail. Matching is lexical, not semantic: use the schema's vocabulary, try
-        synonyms and translate. Read-only."""
+        """Search one datasource's ontology catalog lexically across Terms, mapped columns, SQL attributes, glossary entries, verified examples, sources, unmodeled tables, and (in the knowledge store) record values and top full-text hits. Use as the primary discovery tool when you do not know exact names; use list_terms to browse all Terms, get_term for one known Term, search_text for deep knowledge-store prose search, and search only for ChatGPT connector IDs. Matching is lexical (not vector/semantic), so use schema vocabulary, synonyms, or translations."""
         return svc.search_ontology(query, list(kinds) if kinds else None, limit, datasource)
 
-    @tool(READ)
+    @tool(READ, title="Get full details of one Term")
     def get_term(
-        term: Annotated[str, Field(description="Term name, synonym or id.")],
+        term: Annotated[str, Field(description="Exact Term name, synonym, or id.")],
         datasource: DatasourceArg = None,
     ) -> dict[str, Any]:
-        """Return one Term in full: definition, status, synonyms, body, mapped columns with sample values and
-        formats, SQL attributes, related Terms with join conditions, typed relations and sources,
-        plus record counts for knowledge entities. Accepts a name, synonym or id; if nothing
-        matches, the error lists the closest Terms. Use it to answer 'what is X' and before writing
-        SQL about X; use search_ontology when you do not know the name and describe_table for a
-        physical table. Read-only."""
+        """Retrieve complete business and schema details for one Term: definition, status, synonyms, markdown body, mapped columns with sample values/formats, SQL attributes, join conditions, typed relations, sources, and knowledge record counts. Use to explain 'what is X' or inspect one known Term; use search_ontology when the Term name is unknown, list_terms to browse all Terms, describe_table for raw physical columns, and get_query_context when gathering multi-Term SQL context. Fails with closest Term suggestions if unmatched."""
         return svc.get_term(term, datasource)
 
-    @tool(READ)
+    @tool(READ, title="Describe a physical database table")
     def describe_table(
-        table: Annotated[str, Field(description="Table name, schema-qualified if needed.")],
+        table: Annotated[str, Field(description="Physical table name, schema-qualified if needed (e.g. 'sales.orders').")],
         datasource: DatasourceArg = None,
     ) -> dict[str, Any]:
-        """Return one physical table: every column (including ones no Term maps), keys, junction status, the
-        Terms and attributes on it, its relationships and SQL attributes. Use it to inspect a
-        table's structure; use get_term for business meaning and get_source for
-        provenance. Fails with suggestions if the table name is unknown. Read-only."""
+        """Inspect one physical table's complete catalog metadata: all columns (including unmapped ones), keys, junction flag, attached Terms and attributes, join relationships, and SQL attributes. Use to verify raw table structure or unmapped columns; use get_term for business meaning, get_query_context for multi-Term SQL generation, and get_source for knowledge provenance. Fails with closest table name suggestions if the table does not exist."""
         return svc.describe_table(table, datasource)
 
-    @tool(READ)
+    @tool(READ, title="Find shortest join path between Terms")
     def find_join_path(
-        source: Annotated[str, Field(description="Term or table to start from.")],
-        target: Annotated[str, Field(description="Term or table to reach.")],
+        source: Annotated[str, Field(description="Starting Term name or physical table name.")],
+        target: Annotated[str, Field(description="Destination Term name or physical table name.")],
         datasource: DatasourceArg = None,
     ) -> dict[str, Any]:
-        """Return the shortest chain of accepted relationships between two Terms or tables, with ON conditions,
-        a ready FROM/JOIN clause, fan-out warnings and other roles for the same hop (billing vs
-        delivery city). Use it when you need one specific route; get_query_context already includes
-        the path for a set of Terms. Reports found=false when no chain exists. Read-only."""
+        """Compute the shortest chain of accepted relationships between two Terms or tables, returning ON conditions, a ready FROM/JOIN clause, fan-out warnings, shared-parent caveats, and alternative join roles (e.g. billing vs delivery city). Use when checking one specific pairwise join; use get_query_context to assemble columns, attributes, and joins for a full multi-Term query, and list_relationships to review unapproved joins. Returns found=false when no accepted path connects them."""
         return svc.find_join_path(source, target, datasource)
 
     # ------------------------------------------------------------ answering
-    @tool(READ)
+    @tool(READ, title="Check if the ontology covers a question")
     def check_answerable(
-        question: Annotated[str, Field(description="The user's question.")],
+        question: Annotated[str, Field(description="The user's natural-language question.")],
         entities: Annotated[
             list[str] | None,
-            Field(description="1-5 entity phrases you extracted from the question, in the ontology's language. " + guidance.ENTITY_RULES),
+            Field(description="1-5 entity phrases extracted from the question in the ontology's language. " + guidance.ENTITY_RULES),
         ] = None,
         datasource: DatasourceArg = None,
     ) -> dict[str, Any]:
-        """Check, before any SQL, whether the ontology covers each entity of the question. Extract 1-5 entity
-        phrases yourself and pass them; each comes back covered (by a Term, attribute or SQL
-        attribute), covered_by_value (a name stored in the data), weak, or not covered, with an
-        overall verdict and the next step. When something material is not covered, tell the user
-        instead of substituting a similar measure. Read-only and fast; use get_query_context next."""
+        """Evaluate before writing SQL whether the ontology covers every entity in a user question, returning per-entity coverage (covered, covered_by_value, weak, or not_covered), an overall verdict, and next steps. Call first in the answering workflow and then call get_query_context for covered Terms; do not substitute uncovered metrics. Use search_ontology for ad-hoc exploration instead of question coverage checks."""
         return svc.check_answerable(question, entities, datasource)
 
-    @tool(READ)
+    @tool(READ, title="Assemble SQL query context for Terms")
     def get_query_context(
-        terms: Annotated[list[str], Field(description="Terms you will use (names, synonyms or ids).")],
-        question: Annotated[str | None, Field(description="The question, to find verified example queries.")] = None,
+        terms: Annotated[list[str], Field(description="List of Term names, synonyms, or ids needed to answer the question.")],
+        question: Annotated[str | None, Field(description="User question used to retrieve matching verified example SQL queries.")] = None,
         datasource: DatasourceArg = None,
     ) -> dict[str, Any]:
-        """Return what you need to write the SQL for a set of Terms: qualified tables, mapped columns with
-        samples and formats, SQL attributes, the join path connecting them (with a ready FROM/JOIN
-        clause and role notes), verified example queries, glossary and the dialect's SQL rules. Call
-        it after check_answerable with the Terms you will use. Unknown Terms are listed under
-        unresolved with suggestions; if none resolve, it fails. Read-only."""
+        """Assemble everything needed to write SQL for a set of Terms: qualified tables, mapped columns with sample values/formats, SQL attributes, the connecting join path (with FROM/JOIN SQL and role notes), verified example queries, glossary entries, and dialect rules. Call after check_answerable instead of calling get_term, describe_table, and find_join_path separately; use lookup_values next for exact filter literals. Lists unknown inputs under unresolved with suggestions, and fails if zero Terms resolve."""
         return svc.get_query_context(terms, question, datasource)
 
-    @tool(READ_DB)
+    @tool(READ_DB, title="Look up stored values in a column")
     def lookup_values(
-        column: Annotated[str, Field(description="'table.column'.")],
-        contains: Annotated[str | None, Field(description="Case-insensitive text to look for. Omit to list the most common values.")] = None,
-        limit: Annotated[int, Field(description="Maximum values.")] = 20,
+        column: Annotated[str, Field(description="Target column formatted as 'table.column' (or 'schema.table.column').")],
+        contains: Annotated[str | None, Field(description="Case-insensitive substring to filter values; omit to return the most frequent values.")] = None,
+        limit: Annotated[int, Field(ge=1, le=100, description="Maximum distinct values to return (1-100).")] = 20,
         datasource: DatasourceArg = None,
     ) -> dict[str, Any]:
-        """Return real values stored in a column ('table.column'): matches for a case-insensitive text, close
-        spellings when nothing matches, or the most common values with their counts. Use it to
-        ground literal filters (a place, product or status) before writing them into SQL. Read-only."""
+        """Query live distinct values stored in one column ('table.column') to ground exact literal filters (places, products, statuses) before writing SQL. Use after get_query_context whenever a WHERE filter value is uncertain; use search_ontology to find which table or column holds a concept. Returns matching values with row counts, close spelling suggestions when contains matches nothing, or top values when contains is omitted."""
         return svc.lookup_values(column, contains, limit, datasource)
 
-    @tool(READ_DB)
+    @tool(READ_DB, title="Validate a SQL query against the ontology")
     def validate_sql(
-        sql: Annotated[str, Field(description="One read-only SELECT in the datasource dialect.")],
+        sql: Annotated[str, Field(description="Single read-only SELECT statement in the datasource's SQL dialect.")],
         datasource: DatasourceArg = None,
-        question: Annotated[
-            str | None, Field(description="The user's question; percentages in it are checked against the scale of the columns they filter.")
-        ] = None,
-    ) -> dict[str, Any]:
-        """Check one query without returning rows: read-only guard, unknown tables or columns (with the
-        ontology's name for them), joins the ontology does not know or that use a non-default role,
-        near-miss literals, percent-vs-fraction thresholds, one-to-many fan-out under SUM/AVG/COUNT,
-        and a dry run; also which Terms it relies on and whether they are certified. Pass the question
-        to have a percentage it states ("below 0.18%") checked against the column's scale. Use it before
-        run_sql and fix every error. Read-only."""
-        return svc.validate_sql(sql, datasource, question)
-
-    @tool(READ_DB)
-    def run_sql(
-        sql: Annotated[str, Field(description="One read-only SELECT in the datasource dialect.")],
         question: Annotated[
             str | None,
-            Field(description="The user's question, kept with the query for provenance and used to check percentages in it against the columns' scale."),
+            Field(description="User question; percentages mentioned in it are checked against the numeric scale of filtered columns."),
         ] = None,
-        max_rows: Annotated[int, Field(description="Rows to return (capped by the server).")] = 100,
+    ) -> dict[str, Any]:
+        """Validate a single SELECT query without returning rows: enforces the read-only guard, checks table/column names, verifies joins and default roles, flags near-miss literals, percent-vs-fraction scale mismatches, and one-to-many fan-out under aggregations, and runs a database dry run. Always call before run_sql and pass question when percentages appear; use run_sql only after fixing every reported error. Returns ok, errors, warnings, and the draft/certified status of relied-on Terms."""
+        return svc.validate_sql(sql, datasource, question)
+
+    @tool(READ_DB, title="Execute a read-only SQL query")
+    def run_sql(
+        sql: Annotated[str, Field(description="Single read-only SELECT statement in the datasource's SQL dialect.")],
+        question: Annotated[
+            str | None,
+            Field(description="User question logged with the query for provenance and used to check percent-vs-fraction thresholds."),
+        ] = None,
+        max_rows: Annotated[int, Field(ge=1, description="Maximum rows to return (>= 1; capped by the server's AUTO_ONTOLOGY_MAX_ROWS limit).")] = 100,
         datasource: DatasourceArg = None,
     ) -> dict[str, Any]:
-        """Execute one read-only SELECT and return columns, rows, row_count and truncated, plus the Terms it
-        used and warnings (including percent-vs-fraction thresholds). Use it after validate_sql. Writes, DDL, multiple statements and tables
-        outside the catalog are refused, and the connection itself is read-only. The query is logged
-        with the question for provenance. Show the SQL with the answer and say when rows are
-        truncated."""
+        """Execute one read-only SELECT query against a registered datasource and return columns, rows, row_count, truncated flag, relied-on Terms (with draft/certified status), and warnings. Call after validate_sql passes; use lookup_values to inspect single-column values instead. Refuses writes, DDL, multiple statements, and uncataloged tables on a read-only connection, and logs the query with question for provenance."""
         return svc.run_sql(sql, question, max_rows, datasource)
 
-    @tool(WRITE)
+    @tool(WRITE_DB, title="Save a verified example SQL query")
     def save_example_query(
-        question: Annotated[str, Field(description="The question in the user's words.")],
-        sql: Annotated[str, Field(description="The SQL that answered it correctly.")],
-        note: Annotated[str | None, Field(description="Why this SQL is right (definitions, exclusions).")] = None,
+        question: Annotated[str, Field(description="Natural-language question in the user's words.")],
+        sql: Annotated[str, Field(description="Validated read-only SELECT query that correctly answered the question.")],
+        note: Annotated[str | None, Field(description="Optional rationale explaining business rules, filters, or exclusions in this SQL.")] = None,
         datasource: DatasourceArg = None,
     ) -> dict[str, Any]:
-        """Store a question and SQL pair the user confirmed as correct. Later, get_query_context offers it for
-        similar questions and suggest_sql_attributes mines it. Saving the same question again
-        replaces its SQL. The SQL must validate, or nothing is saved."""
+        """Store a user-confirmed question and SQL pair so get_query_context surfaces it for similar future questions and suggest_sql_attributes can mine reusable logic from it. Call only after the user confirms an answer is correct; use save_sql_attribute for standalone reusable expressions instead. Validates the SQL against the ontology and database first (saving nothing if validation fails); saving the same question again updates its SQL in place."""
         return svc.save_example_query(question, sql, note, datasource)
 
     # --------------------------------------------------------- import/export
-    @tool(READ)
+    @tool(READ, title="Export semantic layer as YAML or JSON")
     def export_ontology(
-        format: Annotated[Literal["yaml", "json"], Field(description="Document format.")] = "yaml",
+        format: Annotated[Literal["yaml", "json"], Field(description="Output serialization format: 'yaml' (human-readable) or 'json'.")] = "yaml",
         datasource: DatasourceArg = None,
     ) -> dict[str, Any]:
-        """Return a datasource's whole semantic layer as one YAML or JSON document: tables, relationships,
-        Terms with column mappings, SQL attributes, concepts and typed relations, glossary and
-        example queries. Use it for review, backup or moving the ontology; records in the knowledge
-        store are not included. Use export_wiki for an Obsidian view. Read-only."""
+        """Serialize one datasource's entire semantic layer as a single YAML or JSON document containing tables, relationships, Terms with column mappings, SQL attributes, concepts, typed relations, glossary entries, and example queries. Use for backup, review, version control, or migrating via import_ontology; use export_wiki to render Obsidian markdown pages instead. Does not include structured record rows from the knowledge store."""
         return svc.export_ontology(datasource, format)
 
-    @tool(WRITE)
+    @tool(WRITE_DESTRUCTIVE, title="Import semantic layer document")
     def import_ontology(
-        document: Annotated[str, Field(description="A document produced by export_ontology.")],
+        document: Annotated[str, Field(description="YAML or JSON ontology document previously produced by export_ontology.")],
         datasource: DatasourceArg = None,
     ) -> dict[str, Any]:
-        """Apply a document produced by export_ontology to a datasource that has been scanned, matching tables
-        and columns by name. Existing items with the same names are updated; a table's Terms are
-        replaced as in save_table_terms. Items that fail (missing tables or columns, invalid SQL)
-        are skipped and listed while the rest is applied, so the result can be partial. Knowledge
-        entities are recreated empty when their tables are missing; records are not imported."""
+        """Import a YAML or JSON semantic layer document produced by export_ontology into an already scanned datasource, matching tables and columns by name. Prerequisite: register and scan the target datasource first with add_datasource or scan_datasource; use save_table_terms or update_term for incremental single-table edits. Upserts same-named items and replaces each imported table's Terms as in save_table_terms; items with missing tables, columns, or invalid SQL are skipped and listed (partial apply). Recreates missing knowledge entities empty without importing record rows."""
         return svc.import_ontology(document, datasource)
 
     # ------------------------------------------- ChatGPT connectors / research
-    @tool(READ)
-    def search(query: Annotated[str, Field(description="Search query.")]) -> dict[str, Any]:
-        """Search Terms, tables and sources across all datasources and return ids for fetch. Intended for
-        ChatGPT connectors and deep research; other clients should prefer search_ontology.
-        Read-only."""
+    @tool(READ, title="Search ontology documents for connectors")
+    def search(
+        query: Annotated[str, Field(description="Lexical search words (Term names, table names, columns, or source titles) matched across all datasources.")],
+    ) -> dict[str, Any]:
+        """Search Terms, tables, and sources across all datasources and return compact {id, title, url} connector records for follow-up with fetch. Intended exclusively for ChatGPT connectors and deep-research clients that require the search/fetch pair; all other MCP clients should use search_ontology (catalog search) or search_text (knowledge-store full-text search) instead. Returns a results list with opaque document ids."""
         return {"results": svc.search_documents(query)}
 
-    @tool(READ)
-    def fetch(id: Annotated[str, Field(description="Document id returned by search, e.g. 'term:term_ab12'.")]) -> dict[str, Any]:
-        """Return the full text of one document returned by search: a Term (definition, body, attributes, SQL
-        attributes, relations, sources), a table, or a source. Read-only."""
+    @tool(READ, title="Fetch one ontology document by connector ID")
+    def fetch(
+        id: Annotated[str, Field(description="Opaque document id returned by search, e.g. 'term:term_ab12', 'table:tbl_1', or 'source:3'.")],
+    ) -> dict[str, Any]:
+        """Retrieve the full text and metadata of one ontology document (a Term, physical table, or knowledge source) using an opaque id returned by search. Intended exclusively as the second step for ChatGPT connectors and deep-research clients; all other MCP clients should call get_term, describe_table, or get_source directly for structured JSON. Fails if the id is unknown or malformed."""
         return svc.fetch_document(id)
 
     # --------------------------------------------------------------- prompts
