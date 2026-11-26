@@ -761,5 +761,34 @@
       "expected_valid": true,
       "forbid_warnings": true
     }
+  ],
+  "semantic_search": [
+    {"id": "sem_syn_client_accounts", "group": "synonym", "target": "ontology", "datasource": "demo", "query": "client accounts", "expected_any": ["Customer"]},
+    {"id": "sem_syn_staff_member", "group": "synonym", "target": "ontology", "datasource": "demo", "query": "staff member", "expected_any": ["Employee"]},
+    {"id": "sem_syn_sales_staff", "group": "synonym", "target": "ontology", "datasource": "demo", "query": "sales staff", "expected_any": ["Employee"]},
+    {"id": "sem_syn_merch_tag", "group": "synonym", "target": "ontology", "datasource": "demo", "query": "merch tag", "expected_any": ["Tag"]},
+    {"id": "sem_syn_best_selling", "group": "synonym", "target": "ontology", "datasource": "knowledge", "query": "best selling", "expected_any": ["Bestseller Tag"]},
+    {"id": "sem_syn_turnover", "group": "synonym", "target": "ontology", "datasource": "demo", "query": "turnover", "expected_any": ["Order Line › Revenue", "Order Line › Net Revenue"]},
+    {"id": "sem_syn_ear_pads", "group": "synonym", "target": "text", "query": "headphones ear pads cracking", "expected_any": ["Ear Cushion Cracking"]},
+    {"id": "sem_para_employees", "group": "paraphrase", "target": "ontology", "datasource": "demo", "query": "employees of the company", "expected_any": ["Employee"]},
+    {"id": "sem_para_money_made", "group": "paraphrase", "target": "ontology", "datasource": "demo", "query": "how much money we made", "expected_any": ["Order Line › Revenue", "Order Line › Net Revenue"]},
+    {"id": "sem_para_warehouse", "group": "paraphrase", "target": "text", "query": "warehouse migration in January", "expected_any": ["January cutover", "Fulfilment Cutover"]},
+    {"id": "sem_para_ssd_hot", "group": "paraphrase", "target": "text", "query": "SSD gets slow when hot", "expected_any": ["SSD Heat Slowdown"]},
+    {"id": "sem_para_seat_wobbles", "group": "paraphrase", "target": "text", "query": "office seat base wobbles", "expected_any": ["Wobbling Chair Base"]},
+    {"id": "sem_para_ran_out", "group": "paraphrase", "target": "text", "query": "items ran out in September", "expected_any": ["September Stockout", "September stockout"]},
+    {"id": "sem_ko_employee_list", "group": "cross_lingual", "target": "ontology", "datasource": "demo", "query": "직원 목록", "expected_any": ["Employee"]},
+    {"id": "sem_ko_city", "group": "cross_lingual", "target": "ontology", "datasource": "demo", "query": "도시", "expected_any": ["City"]},
+    {"id": "sem_ko_city_name", "group": "cross_lingual", "target": "ontology", "datasource": "demo", "query": "도시 이름", "expected_any": ["City › City Name", "City"]},
+    {"id": "sem_ko_product_list", "group": "cross_lingual", "target": "ontology", "datasource": "demo", "query": "제품 목록", "expected_any": ["Product"]},
+    {"id": "sem_ko_product_category", "group": "cross_lingual", "target": "ontology", "datasource": "demo", "query": "제품 카테고리", "expected_any": ["Product Category"]},
+    {"id": "sem_ko_revenue", "group": "cross_lingual", "target": "ontology", "datasource": "demo", "query": "매출", "expected_any": ["Order Line › Revenue", "Order Line › Net Revenue"]},
+    {"id": "sem_ko_order_status", "group": "cross_lingual", "target": "ontology", "datasource": "demo", "query": "주문 상태", "expected_any": ["Order › Order Status"]},
+    {"id": "sem_ko_chair_wobble", "group": "cross_lingual", "target": "text", "query": "의자 흔들림", "expected_any": ["Wobbling Chair Base", "Office Chair"]},
+    {"id": "sem_ko_headphone_pads", "group": "cross_lingual", "target": "text", "query": "헤드폰 이어패드 파손", "expected_any": ["Ear Cushion Cracking", "Noise Cancelling Headphones"]},
+    {"id": "sem_ko_office_chair", "group": "cross_lingual", "target": "text", "query": "사무용 의자", "expected_any": ["Office Chair"]},
+    {"id": "sem_ko_bestseller_tag", "group": "cross_lingual", "target": "text", "query": "베스트셀러 태그", "expected_any": ["Bestseller Tag"]},
+    {"id": "sem_ko_quality_summary", "group": "cross_lingual", "target": "text", "query": "품질 문제 요약", "expected_any": ["Product Quality Issue"]},
+    {"id": "sem_neg_physics", "group": "negative", "target": "ontology", "datasource": "demo", "query": "astrophysics telescope", "expect_empty": true},
+    {"id": "sem_neg_quantum_text", "group": "negative", "target": "text", "query": "quantum entanglement telemetry", "expect_empty": true}
   ]
 }

@@ -217,3 +217,87 @@ def test_compare_detects_quality_and_latency_regressions(tmp_path: Path):
     )
     assert proc_fail.returncode == 1
     assert "SLOWDOWN" in proc_fail.stdout
+
+
+# ------------------------------------------------------------------ semantic (hybrid) benchmark
+SEMANTIC_GROUPS = ("synonym", "paraphrase", "cross_lingual")
+
+
+class _StubEmbedder:
+    """Deterministic multilingual stub: Korean and English words share concept axes."""
+
+    _AXES = (
+        ("customer", "client", "고객"),
+        ("employee", "staff", "직원"),
+        ("city", "도시"),
+        ("product", "제품"),
+        ("chair", "의자", "wobbl", "흔들"),
+        ("headphone", "cushion", "헤드폰", "이어"),
+    )
+    model_name = "stub-multilingual-v1"
+
+    def _encode(self, text: str, *, query: bool = False) -> list[float]:
+        low = (text or "").casefold()
+        # Separate small document/query axes keep every vector non-zero (sqlite-vec has no cosine for
+        # zero vectors) without making unrelated queries look similar to unrelated documents.
+        vec = [float(sum(kw in low for kw in axis)) for axis in self._AXES]
+        vec += [0.0, 0.05] if query else [0.05, 0.0]
+        norm = sum(x * x for x in vec) ** 0.5
+        return [x / norm for x in vec] if norm else vec
+
+    def embed_documents(self, texts):
+        return [self._encode(t) for t in texts]
+
+    def embed_query(self, text):
+        return self._encode(text, query=True)
+
+
+def _has_korean(text: str) -> bool:
+    return any("가" <= ch <= "힣" for ch in text)
+
+
+def test_semantic_task_set_covers_synonym_paraphrase_and_cross_lingual():
+    data = json.loads(TASKS_PATH.read_text(encoding="utf-8"))
+    tasks = data["semantic_search"]
+    other_ids = {item["id"] for area in CORE_AREAS[1:] for item in data[area]}
+    ids = [t["id"] for t in tasks]
+    assert len(ids) == len(set(ids)) and not (set(ids) & other_ids)
+    by_group: dict[str, list[dict]] = {}
+    for t in tasks:
+        assert t["target"] in ("ontology", "text")
+        by_group.setdefault(t["group"], []).append(t)
+        if not t.get("expect_empty"):
+            assert t["expected_any"]
+    for group in SEMANTIC_GROUPS:
+        assert len(by_group.get(group, [])) >= 5, group
+    assert all(_has_korean(t["query"]) for t in by_group["cross_lingual"])
+    assert by_group.get("negative")
+
+
+def test_semantic_benchmark_compares_lexical_and_hybrid_modes():
+    runner = _load_runner()
+    sem = runner.run_semantic_benchmark(TASKS_PATH, warmup=0, iterations=1, embedder=_StubEmbedder())
+    lex, hyb = sem["modes"]["lexical"], sem["modes"]["hybrid"]
+    assert lex["search_mode"] == "lexical" and hyb["search_mode"] == "hybrid"
+    for mode in (lex, hyb):
+        assert set(mode["recall_by_group"]) == set(SEMANTIC_GROUPS)
+        assert mode["latency_ms"]["count"] == sem["tasks_total"]
+        assert mode["latency_ms"]["p95"] >= mode["latency_ms"]["p50"] >= 0
+        assert mode["negative_precision"] == 1.0
+    assert lex["recall_by_group"]["cross_lingual"] == 0.0
+    assert hyb["recall_by_group"]["cross_lingual"] > 0.0
+    assert sem["delta"]["recall_at_3"] > 0 and not sem["delta"]["lost"]
+    assert "sem_ko_employee_list" in sem["delta"]["gained"]
+
+
+def test_semantic_flag_reports_and_default_run_stays_lexical(monkeypatch, capsys):
+    runner = _load_runner()
+    monkeypatch.setattr(runner, "run_semantic_benchmark", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no extra")))
+    assert runner.main(["--semantic", "--iterations", "1", "--warmup", "0"]) == 2
+    assert "no extra" in capsys.readouterr().err
+
+    calls: list[dict] = []
+    monkeypatch.setattr(runner, "run_semantic_benchmark", lambda *a, **k: calls.append(k))
+    assert runner.main(["--iterations", "1", "--warmup", "0", "--format", "json"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert "semantic_search" not in out and not calls

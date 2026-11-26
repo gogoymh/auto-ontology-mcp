@@ -530,7 +530,7 @@ What the structure adds on top of markdown pages:
 Limits to know about:
 
 - Generated pages are a one-way view. Edits made to them in Obsidian are not read back; change knowledge through the assistant and run `export_wiki` again (it replaces only the pages it generated and never touches originals or pages you wrote).
-- Search is lexical by default (FTS5 matches words and prefixes, not meaning). Install the optional `semantic` extra (`fastembed` + `sqlite-vec`) to enable local hybrid vector search for synonyms, paraphrases and multilingual queries without external API keys. Otherwise, search with the words the sources use, add your own words as synonyms, and translate when the sources are in another language.
+- Search is lexical by default (FTS5 matches words and prefixes, not meaning). Install the optional `semantic` extra (`fastembed` + `sqlite-vec`) to enable local hybrid vector search for synonyms, paraphrases and multilingual queries without external API keys. On the built-in benchmark it lifts recall@3 on synonym, paraphrase and Korean-English queries from 0.40 to 0.84 for about 4 ms more per query (`uv run python benchmarks/run_benchmark.py --semantic`). Otherwise, search with the words the sources use, add your own words as synonyms, and translate when the sources are in another language.
 - The store indexes passages, not whole originals. What the model did not save as a passage or summary is in the vault but not in `search_text`.
 - Nothing watches your files or the vault. When a document changes, ask the assistant to read it again. Earlier versions of its original stay in the vault until you delete them.
 - It is a single-user store on your machine. Back it up by copying `~/.auto-ontology-mcp`.

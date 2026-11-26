@@ -9,6 +9,11 @@ using the built-in retail demo database and demo knowledge store:
   4. check_answerable
   5. validate_sql
 
+With ``--semantic`` it also runs the ``semantic_search`` task set (synonym,
+paraphrase and Korean-English cross-lingual queries) twice, once lexical-only
+and once with the optional local hybrid search (fastembed + sqlite-vec), and
+reports recall@3, MRR and latency for both modes side by side.
+
 All runs execute inside an isolated temporary directory without touching user
 state or requesting GUI focus.
 """
@@ -17,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import math
 import platform
 import statistics
@@ -34,6 +40,8 @@ from auto_ontology_mcp.demo import build_demo_database
 from auto_ontology_mcp.demo_knowledge import seed_demo_knowledge
 from auto_ontology_mcp.service import OntologyService
 
+logger = logging.getLogger("auto_ontology_mcp.benchmark")
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_TASKS_PATH = Path(__file__).resolve().parent / "tasks.json"
 SCORE_CATEGORIES = (
@@ -50,6 +58,9 @@ LATENCY_CATEGORIES = (
     "check_answerable",
     "validate_sql",
 )
+SEMANTIC_GROUPS = ("synonym", "paraphrase", "cross_lingual")
+SEMANTIC_MODES = ("lexical", "hybrid")
+SEMANTIC_RECALL_K = 3
 
 
 def _git_commit() -> str:
@@ -88,7 +99,10 @@ def _latency_summary(samples_ms: list[float]) -> dict[str, float]:
     }
 
 
-def _make_service(root: Path, demo_db: Path) -> tuple[OntologyService, float]:
+def _make_service(
+    root: Path, demo_db: Path, *, semantic: bool = False, embedder: Any = None
+) -> tuple[OntologyService, float]:
+    """Build an isolated service; core benchmarks stay lexical so results never depend on a model."""
     settings = replace(
         Settings.from_env(),
         home=root,
@@ -96,8 +110,12 @@ def _make_service(root: Path, demo_db: Path) -> tuple[OntologyService, float]:
         token=None,
         vault=None,
         allow_datasource_tools=True,
+        semantic_search=semantic,
     )
     svc = OntologyService(settings)
+    if semantic and embedder is not None:
+        svc.vectors._embedder = embedder
+        svc.vectors._model_name = embedder.model_name
     t0 = time.perf_counter()
     svc.add_datasource("demo", f"sqlite:///{demo_db}", description="benchmark demo")
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
@@ -551,6 +569,139 @@ def _eval_validate_sql(
     )
 
 
+def _hit_label(hit: dict[str, Any]) -> str | None:
+    return hit.get("name") or hit.get("heading") or hit.get("title")
+
+
+def _run_semantic_query(svc: OntologyService, item: dict[str, Any]) -> list[dict[str, Any]]:
+    if item.get("target") == "text":
+        return svc.knowledge.search_text(item["query"], kinds=item.get("kinds"), limit=10)["hits"]
+    return svc.search_ontology(item["query"], kinds=item.get("kinds"), datasource=item.get("datasource"))["hits"]
+
+
+def _eval_semantic_mode(
+    svc: OntologyService, tasks_spec: list[dict[str, Any]], *, warmup: int, iterations: int
+) -> dict[str, Any]:
+    """Score one search mode on the semantic task set: recall@3, MRR, per-group recall and latency."""
+    # The first pass embeds and indexes every document (hybrid only); time it separately.
+    t0 = time.perf_counter()
+    for item in tasks_spec:
+        _run_semantic_query(svc, item)
+    cold_ms = (time.perf_counter() - t0) * 1000.0
+    for _ in range(max(0, warmup - 1)):
+        for item in tasks_spec:
+            _run_semantic_query(svc, item)
+
+    latencies: list[float] = []
+    last: dict[str, list[dict[str, Any]]] = {}
+    for _ in range(iterations):
+        for item in tasks_spec:
+            t0 = time.perf_counter()
+            hits = _run_semantic_query(svc, item)
+            latencies.append((time.perf_counter() - t0) * 1000.0)
+            last[item["id"]] = hits
+
+    task_results: list[dict[str, Any]] = []
+    group_hits: dict[str, list[int]] = {}
+    rr_all: list[float] = []
+    neg_passed = neg_total = 0
+    for item in tasks_spec:
+        labels = [_hit_label(h) for h in last[item["id"]]]
+        if item.get("expect_empty"):
+            neg_total += 1
+            ok = not labels
+            neg_passed += int(ok)
+            task_results.append({"id": item["id"], "group": "negative", "passed": ok, "actual_top3": labels[:3]})
+            continue
+        expected = set(item["expected_any"])
+        rank = next((i for i, n in enumerate(labels[:SEMANTIC_RECALL_K], start=1) if n in expected), None)
+        rr_all.append(1.0 / rank if rank else 0.0)
+        group_hits.setdefault(item["group"], []).append(int(rank is not None))
+        task_results.append(
+            {
+                "id": item["id"],
+                "group": item["group"],
+                "passed": rank is not None,
+                "rank": rank,
+                "expected_any": item["expected_any"],
+                "actual_top3": labels[:SEMANTIC_RECALL_K],
+            }
+        )
+
+    positives = [h for hits in group_hits.values() for h in hits]
+    return {
+        "search_mode": "hybrid" if svc.vectors.is_available() else "lexical",
+        f"recall_at_{SEMANTIC_RECALL_K}": round(statistics.fmean(positives), 4) if positives else 1.0,
+        "mrr": round(statistics.fmean(rr_all), 4) if rr_all else 1.0,
+        "recall_by_group": {g: round(statistics.fmean(v), 4) for g, v in sorted(group_hits.items())},
+        "negative_precision": round(neg_passed / neg_total, 4) if neg_total else 1.0,
+        "passed": sum(1 for t in task_results if t["passed"]),
+        "total": len(task_results),
+        "cold_pass_ms": round(cold_ms, 3),
+        "latency_ms": _latency_summary(latencies),
+        "tasks": task_results,
+    }
+
+
+def run_semantic_benchmark(
+    tasks_path: Path = DEFAULT_TASKS_PATH,
+    *,
+    warmup: int = 1,
+    iterations: int = 3,
+    embedder: Any = None,
+) -> dict[str, Any]:
+    """Compare lexical-only and hybrid search on the semantic task set.
+
+    ``embedder`` replaces the fastembed model (tests use a deterministic stub). Raises
+    RuntimeError when hybrid search is unavailable (the ``semantic`` extra is missing).
+    """
+    spec = json.loads(Path(tasks_path).read_text(encoding="utf-8"))
+    tasks_spec = spec["semantic_search"]
+    iterations = max(1, int(iterations))
+    warmup = max(0, int(warmup))
+    modes: dict[str, dict[str, Any]] = {}
+    with tempfile.TemporaryDirectory(prefix="aom-bench-sem-") as tmp:
+        tmp_path = Path(tmp)
+        demo_db = build_demo_database(tmp_path / "demo.sqlite", seed=int(spec.get("seed", 7)))
+        for mode in SEMANTIC_MODES:
+            svc, _ = _make_service(tmp_path / mode, demo_db, semantic=mode == "hybrid", embedder=embedder)
+            if mode == "hybrid" and not svc.vectors.is_available():
+                raise RuntimeError(
+                    "Hybrid search is unavailable: "
+                    + str(svc.semantic_status().get("reason"))
+                    + ". Install with `uv sync --extra semantic`."
+                )
+            _apply_setup(svc, spec["setup"])
+            logger.info("semantic benchmark: running %d tasks in %s mode", len(tasks_spec), mode)
+            modes[mode] = _eval_semantic_mode(svc, tasks_spec, warmup=warmup, iterations=iterations)
+            if mode == "hybrid":
+                modes[mode]["model"] = svc.vectors.model_name
+
+    lex, hyb = modes["lexical"], modes["hybrid"]
+    key = f"recall_at_{SEMANTIC_RECALL_K}"
+    lex_ok = {t["id"]: t["passed"] for t in lex["tasks"]}
+    hyb_ok = {t["id"]: t["passed"] for t in hyb["tasks"]}
+    lex_p50 = lex["latency_ms"]["p50"]
+    hyb_p50 = hyb["latency_ms"]["p50"]
+    delta = {
+        key: round(hyb[key] - lex[key], 4),
+        "mrr": round(hyb["mrr"] - lex["mrr"], 4),
+        "recall_by_group": {
+            g: round(hyb["recall_by_group"].get(g, 0.0) - lex["recall_by_group"].get(g, 0.0), 4)
+            for g in sorted(set(lex["recall_by_group"]) | set(hyb["recall_by_group"]))
+        },
+        "p50_ms": round(hyb_p50 - lex_p50, 3),
+        "p50_ratio": round(hyb_p50 / lex_p50, 3) if lex_p50 > 0 else None,
+        "gained": sorted(i for i, ok in hyb_ok.items() if ok and not lex_ok.get(i)),
+        "lost": sorted(i for i, ok in lex_ok.items() if ok and not hyb_ok.get(i)),
+    }
+    logger.info(
+        "semantic benchmark: recall@%d lexical=%.4f hybrid=%.4f, p50 lexical=%.3fms hybrid=%.3fms",
+        SEMANTIC_RECALL_K, lex[key], hyb[key], lex_p50, hyb_p50,
+    )
+    return {"tasks_total": len(tasks_spec), "recall_k": SEMANTIC_RECALL_K, "modes": modes, "delta": delta}
+
+
 def run_benchmark(
     tasks_path: Path = DEFAULT_TASKS_PATH,
     *,
@@ -770,6 +921,51 @@ def _format_run_markdown(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _format_semantic_text(sem: dict[str, Any]) -> str:
+    key = f"recall_at_{sem['recall_k']}"
+    lines = [f"Semantic search: lexical vs hybrid ({sem['tasks_total']} tasks, model {sem['modes']['hybrid'].get('model')})"]
+    for mode in SEMANTIC_MODES:
+        m = sem["modes"][mode]
+        groups = "  ".join(f"{g}={m['recall_by_group'].get(g, 0.0):.2f}" for g in SEMANTIC_GROUPS)
+        lines.append(
+            f"  - {mode:8s} recall@{sem['recall_k']}={m[key]:.4f}  mrr={m['mrr']:.4f}  {groups}  "
+            f"neg={m['negative_precision']:.2f}  p50={m['latency_ms']['p50']:.3f}ms  "
+            f"p95={m['latency_ms']['p95']:.3f}ms  cold={m['cold_pass_ms']:.1f}ms"
+        )
+    d = sem["delta"]
+    lines.append(
+        f"  - delta    recall@{sem['recall_k']} {d[key]:+.4f}  mrr {d['mrr']:+.4f}  p50 {d['p50_ms']:+.3f}ms"
+        + (f" ({d['p50_ratio']:.2f}x)" if d["p50_ratio"] is not None else "")
+    )
+    if d["gained"]:
+        lines.append(f"      gained: {', '.join(d['gained'])}")
+    if d["lost"]:
+        lines.append(f"      lost:   {', '.join(d['lost'])}")
+    return "\n".join(lines)
+
+
+def _format_semantic_markdown(sem: dict[str, Any]) -> str:
+    k = sem["recall_k"]
+    key = f"recall_at_{k}"
+    lines = [
+        f"### Semantic Search: lexical vs hybrid (`{sem['modes']['hybrid'].get('model')}`)",
+        "",
+        f"| Mode | Recall@{k} | MRR | Synonym | Paraphrase | Cross-lingual | Negatives | p50 (ms) | p95 (ms) |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for mode in SEMANTIC_MODES:
+        m = sem["modes"][mode]
+        g = m["recall_by_group"]
+        lines.append(
+            f"| {mode} | {m[key]:.4f} | {m['mrr']:.4f} | {g.get('synonym', 0.0):.2f} | {g.get('paraphrase', 0.0):.2f} | "
+            f"{g.get('cross_lingual', 0.0):.2f} | {m['negative_precision']:.2f} | {m['latency_ms']['p50']:.3f} | "
+            f"{m['latency_ms']['p95']:.3f} |"
+        )
+    d = sem["delta"]
+    lines.append(f"| delta | {d[key]:+.4f} | {d['mrr']:+.4f} | | | | | {d['p50_ms']:+.3f} | |")
+    return "\n".join(lines)
+
+
 def _format_compare_text(cmp: dict[str, Any]) -> str:
     ov = cmp["overall"]
     lines = [
@@ -857,6 +1053,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fail-on-latency", action="store_true", help="Exit 1 on latency regressions.")
     parser.add_argument("--max-latency-ratio", type=float, default=2.5, help="Max p50 latency ratio vs baseline.")
     parser.add_argument("--min-latency-delta-ms", type=float, default=10.0, help="Min p50 delta (ms) for slowdown.")
+    parser.add_argument(
+        "--semantic",
+        action="store_true",
+        help="Also compare lexical-only and hybrid (fastembed + sqlite-vec) recall and latency on the semantic task set.",
+    )
     parser.add_argument("--format", choices=("text", "markdown", "json"), default="text", help="Output format.")
     return parser
 
@@ -884,6 +1085,15 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if cmp["failed"] else 0
 
     result = run_benchmark(args.tasks, warmup=args.warmup, iterations=args.iterations)
+    if args.semantic:
+        try:
+            result["semantic_search"] = run_semantic_benchmark(
+                args.tasks, warmup=args.warmup, iterations=args.iterations
+            )
+        except RuntimeError as exc:
+            logger.error("semantic benchmark failed: %s", exc)
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -904,6 +1114,9 @@ def main(argv: list[str] | None = None) -> int:
             print(_format_compare_markdown(cmp))
         else:
             print(_format_compare_text(cmp))
+        if args.semantic and args.format != "json":
+            print()
+            print(_format_semantic_markdown(result["semantic_search"]) if args.format == "markdown" else _format_semantic_text(result["semantic_search"]))
         return 1 if cmp["failed"] else 0
 
     if args.format == "json":
@@ -912,6 +1125,10 @@ def main(argv: list[str] | None = None) -> int:
         print(_format_run_markdown(result))
     else:
         print(_format_run_text(result))
+    if args.semantic and args.format != "json":
+        print()
+        sem = result["semantic_search"]
+        print(_format_semantic_markdown(sem) if args.format == "markdown" else _format_semantic_text(sem))
     return 0
 
 

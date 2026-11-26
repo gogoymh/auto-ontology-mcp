@@ -509,6 +509,10 @@ class VectorIndex:
                                 (part, qblob, limit),
                             ).fetchall()
                             for r in rows:
+                                # vec0 returns NULL cosine distance for zero vectors; skip them
+                                # instead of failing the whole vector search.
+                                if r["distance"] is None:
+                                    continue
                                 sim = max(-1.0, min(1.0, 1.0 - float(r["distance"])))
                                 if sim >= min_similarity:
                                     raw_hits.append((int(r["rowid"]), sim))
