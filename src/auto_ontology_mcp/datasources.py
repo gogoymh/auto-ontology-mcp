@@ -158,12 +158,25 @@ def _readonly_engine(url: str, timeout_s: int, oracle_client_lib: str | None = N
 
     if backend == "sqlite":
         db = parsed.database
-        if db and db != ":memory:" and not db.startswith("file:"):
-            path = Path(db).expanduser().resolve()
-            if not path.exists():
-                raise FileNotFoundError(f"SQLite file not found: {path}")
-            # URI mode lets the driver itself refuse writes.
-            parsed = parsed.set(database=f"file:{path}?mode=ro", query={"uri": "true"})
+        if db and db != ":memory:":
+            if db.startswith("file:"):
+                # make_url decodes %xx, so a '#' in the database part or in a query value
+                # would swallow the appended mode=ro into a fragment; refuse those ('?' in a
+                # value is harmless, only the first '?' starts the query).
+                if "?" in db or "#" in db or any("#" in str(v) for v in parsed.query.values()):
+                    raise ValueError(f"SQLite file: URI must not contain a '#': {db}")
+                # Keep the user's URI options (immutable, nolock, vfs), overriding only mode;
+                # with uri=true SQLAlchemy appends the query to url.database, so mode must sit
+                # in the query dict or pysqlite sees 'file:...?mode=ro?immutable=1'.
+                opts = {k: v for k, v in parsed.query.items() if k != "mode"}
+                opts["mode"] = "ro"
+                parsed = parsed.set(database=db, query=opts)
+            else:
+                path = Path(db).expanduser().resolve()
+                if not path.exists():
+                    raise FileNotFoundError(f"SQLite file not found: {path}")
+                # URI mode lets the driver itself refuse writes.
+                parsed = parsed.set(database=f"file:{path}?mode=ro", query={"uri": "true"})
         connect_args["check_same_thread"] = False
     elif backend == "postgresql":
         driver = parsed.get_driver_name()
