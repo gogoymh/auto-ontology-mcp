@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import difflib
 import logging
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -54,15 +55,15 @@ def _type_family(data_type: str | None) -> str:
     return (data_type or "").lower() or "unknown"
 
 
-def _types_compatible(a: str | None, b: str | None) -> bool:
-    fa, fb = _type_family(a), _type_family(b)
-    if fa == fb:
+def _families_compatible(first: str, second: str) -> bool:
+    """Whether two columns of these type families may join."""
+    if first == second:
         return True
     numeric = {"int", "num"}
-    if fa in numeric and fb in numeric:
+    if first in numeric and second in numeric:
         return True
     # A text code never references an integer key (state_code → state_id).
-    return "unknown" in (fa, fb)
+    return "unknown" in (first, second)
 
 
 def infer_primary_key(table: dict[str, Any], columns: list[dict[str, Any]]) -> list[str]:
@@ -96,51 +97,159 @@ def _looks_like_measure(column: str) -> bool:
     return any(w in _MEASURE_HINTS for w in words)
 
 
-def _score(source_col: dict[str, Any], source_table: dict[str, Any], target_col: dict[str, Any], target_table: dict[str, Any]) -> tuple[float, str | None, str] | None:
-    """Name evidence that *source_col* references *target_col* (a PK)."""
-    s_name = compact(source_col["name"])
-    t_name = compact(target_col["name"])
-    t_table = compact(target_table["name"])
-    t_table_sing = compact_singular(target_table["name"])
-    base = id_base(source_col["name"])
+# Values of a primary key column that name the key itself rather than an entity: "customer_id"
+# cannot reference a table by matching "id", so these fall through to the table-name rules.
+_BARE_NAMES = ("id", "uuid", "guid", "key")
+_FUZZY_CUTOFF = 0.85
+# The fuzzy rule scores 0.6, and a column keeps only candidates within 0.1 of its best score.
+# Once an indexed rule scores above this, no fuzzy candidate can be kept, so the scan is skipped.
+_FUZZY_FLOOR = 0.7
 
-    # Same column name on both sides, and it is not a bare "id": customerid ↔ customers.customerid.
+
+@dataclass(frozen=True)
+class _Prepared:
+    """A column with the string work `_score_prepared` needs, done once instead of once per pair."""
+
+    column: dict[str, Any]
+    table: dict[str, Any]
+    name: str
+    base: str | None
+    family: str
+    table_compact: str
+    table_singular: str
+
+
+def _prepare(column: dict[str, Any], table: dict[str, Any]) -> _Prepared:
+    return _Prepared(
+        column=column,
+        table=table,
+        name=compact(column["name"]),
+        base=id_base(column["name"]),
+        family=_type_family(column.get("data_type")),
+        table_compact=compact(table["name"]),
+        table_singular=compact_singular(table["name"]),
+    )
+
+
+def _similar(base: str, table_name: str) -> float:
+    """``SequenceMatcher.ratio()``, with the two cheap upper bounds that can rule it out first."""
+    matcher = difflib.SequenceMatcher(None, base, table_name)
+    if matcher.real_quick_ratio() < _FUZZY_CUTOFF or matcher.quick_ratio() < _FUZZY_CUTOFF:
+        return 0.0
+    return matcher.ratio()
+
+
+def _score_prepared(source: _Prepared, target: _Prepared) -> tuple[float, str | None, str] | None:
+    """Name evidence that *source* references *target* (a PK).
+
+    The order of these rules is part of the behavior: the first match wins, so a 0.8 rule taken
+    early beats a 0.85 rule taken later.
+    """
+    s_name, base, s_col = source.name, source.base, source.column["name"]
+    t_name, t_col = target.name, target.column["name"]
+
+    # Same column name on both sides, and it is not a bare id: customerid vs customers.customerid.
     if s_name == t_name and t_name not in ("id", "uuid", "guid", "key", "code"):
-        return 0.95, None, f"same column name as {target_table['name']}.{target_col['name']}"
+        return 0.95, None, f"same column name as {target.table['name']}.{t_col}"
 
     if base is None:
         return None
 
     # Within one table only genuine self references count (parent_id, manager_id).
-    if source_table["id"] == target_table["id"]:
+    if source.table["id"] == target.table["id"]:
         if base in _SELF_REFERENCE or base.startswith("parent"):
-            return 0.7, base, f"self-reference '{source_col['name']}'"
+            return 0.7, base, f"self-reference '{s_col}'"
         return None
 
-    # Target PK is a bare id: customer_id → customers.id
+    # Target PK is a bare id: customer_id -> customers.id
     if t_name in ("id", "uuid", "guid", "key"):
-        if base in (t_table_sing, t_table):
-            return 0.9, None, f"'{source_col['name']}' names table {target_table['name']}"
-        for stem in (t_table_sing, t_table):
+        if base in (target.table_singular, target.table_compact):
+            return 0.9, None, f"'{s_col}' names table {target.table['name']}"
+        for stem in (target.table_singular, target.table_compact):
             if stem and len(stem) >= 3 and base.endswith(stem):
                 role = base[: -len(stem)] or None
-                return 0.8, role, f"'{source_col['name']}' ends with {target_table['name']} (role '{role}')"
-        ratio = difflib.SequenceMatcher(None, base, t_table_sing).ratio()
-        if ratio >= 0.85:
-            return 0.6, None, f"'{base}' resembles {target_table['name']} ({ratio:.2f})"
+                return 0.8, role, f"'{s_col}' ends with {target.table['name']} (role '{role}')"
+        ratio = _similar(base, target.table_singular)
+        if ratio >= _FUZZY_CUTOFF:
+            return 0.6, None, f"'{base}' resembles {target.table['name']} ({ratio:.2f})"
         return None
 
-    # Target PK is entity-named: delivery_city_id → cities.city_id, billingcustomerid → customerid
+    # Target PK is entity-named: delivery_city_id -> cities.city_id, billingcustomerid -> customerid
     if len(t_name) >= 4 and s_name.endswith(t_name):
         role = s_name[: -len(t_name)] or None
-        return 0.8, role, f"'{source_col['name']}' ends with {target_col['name']} (role '{role}')"
-    t_base = id_base(target_col["name"])
+        return 0.8, role, f"'{s_col}' ends with {t_col} (role '{role}')"
+    t_base = target.base
     if t_base and base == t_base:
         return 0.85, None, f"same entity stem '{base}'"
     if t_base and len(t_base) >= 3 and base.endswith(t_base):
         role = base[: -len(t_base)] or None
-        return 0.75, role, f"'{source_col['name']}' ends with entity '{t_base}' (role '{role}')"
+        return 0.75, role, f"'{s_col}' ends with entity '{t_base}' (role '{role}')"
     return None
+
+
+class _TargetIndex:
+    """Name lookups that replace "compare this column with every primary key".
+
+    Every rule in `_score_prepared` asks whether a source name *ends with* a target name or table
+    name, so a target is found from a suffix of the source name. The index only narrows the
+    candidates: the rules still decide, in order, and a target the index misses would only ever
+    fail them, because each rule's condition is one of the keys here.
+    """
+
+    def __init__(self, targets: list[_Prepared]) -> None:
+        self.targets = targets
+        self.order = {target.column["id"]: i for i, target in enumerate(targets)}
+        self._by_name: dict[str, list[_Prepared]] = {}
+        self._by_stem: dict[str, list[_Prepared]] = {}
+        self._by_base: dict[str, list[_Prepared]] = {}
+        self._same_table: dict[str, list[_Prepared]] = {}
+        self._fuzzy: list[_Prepared] = []
+        for target in targets:
+            self._by_name.setdefault(target.name, []).append(target)
+            self._same_table.setdefault(target.table["id"], []).append(target)
+            if target.base:
+                self._by_base.setdefault(target.base, []).append(target)
+            if target.name in _BARE_NAMES:
+                for stem in {target.table_singular, target.table_compact}:
+                    if stem:
+                        self._by_stem.setdefault(stem, []).append(target)
+                self._fuzzy.append(target)
+        self._fuzzy.sort(key=lambda target: len(target.table_singular))
+        self._fuzzy_lengths = [len(target.table_singular) for target in self._fuzzy]
+
+    def candidates(self, source: _Prepared) -> list[_Prepared]:
+        found: dict[str, _Prepared] = {}
+
+        def add(items: list[_Prepared]) -> None:
+            for target in items:
+                found[target.column["id"]] = target
+
+        add(self._same_table.get(source.table["id"], []))
+        add(self._by_name.get(source.name, []))
+        base = source.base
+        if base is None:
+            return list(found.values())
+        # A source name ends with the target it references, so every suffix is a key to try.
+        for i in range(len(base)):
+            suffix = base[i:]
+            add(self._by_stem.get(suffix, []))
+            add(self._by_base.get(suffix, []))
+        for i in range(len(source.name) - 3):
+            add(self._by_name.get(source.name[i:], []))
+        return list(found.values())
+
+    def fuzzy_candidates(self, source: _Prepared) -> list[_Prepared]:
+        """The bare-id targets the fuzzy rule could reach.
+
+        It wants a ratio of 0.85 between the source's entity stem and the target's table name,
+        which caps how far apart their lengths can be: only that window is worth scoring.
+        """
+        base = source.base
+        if base is None:
+            return []
+        low = (85 * len(base) + 114) // 115
+        high = (115 * len(base)) // 85
+        return self._fuzzy[bisect_left(self._fuzzy_lengths, low) : bisect_right(self._fuzzy_lengths, high)]
 
 
 def candidate_pairs(
@@ -153,14 +262,15 @@ def candidate_pairs(
     ``declared`` holds ``(source_column_id, target_column_id)`` already known.
     """
     declared_sources = {s for s, _ in declared}
-    targets: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    targets: list[_Prepared] = []
     for table in tables:
         pk = table.get("pk") or []
         if len(pk) != 1:
             continue
         for col in columns_by_table.get(table["id"], []):
             if col["name"] == pk[0]:
-                targets.append((table, col))
+                targets.append(_prepare(col, table))
+    index = _TargetIndex(targets)
 
     candidates: list[Candidate] = []
     unlinked: list[dict[str, Any]] = []
@@ -170,29 +280,48 @@ def candidate_pairs(
             if col["id"] in declared_sources:
                 continue
             is_own_pk = col["name"] in pk and len(pk) == 1
-            id_like = id_base(col["name"]) is not None
-            best: list[Candidate] = []
-            for t_table, t_col in targets:
-                if t_col["id"] == col["id"]:
-                    continue
-                if is_own_pk and t_table["id"] == table["id"]:
-                    continue
-                if _looks_like_measure(col["name"]) and not id_like:
-                    continue
-                if not _types_compatible(col.get("data_type"), t_col.get("data_type")):
-                    continue
-                scored = _score(col, table, t_col, t_table)
-                if scored is None:
-                    continue
-                score, role, reason = scored
-                # A table's own single PK only references another table in 1:1 extension tables.
-                if is_own_pk:
-                    score -= 0.2
-                best.append(Candidate(source={**col, "table": table}, target={**t_col, "table": t_table}, name_score=score, role=role, reasons=[reason]))
-            if best:
-                best.sort(key=lambda c: c.name_score, reverse=True)
-                top = best[0].name_score
-                candidates.extend(c for c in best if c.name_score >= top - 0.1)
+            source = _prepare(col, table)
+            id_like = source.base is not None
+            if _looks_like_measure(col["name"]) and not id_like:
+                continue
+            def score_all(candidates: Any) -> list[tuple[float, str | None, str, _Prepared]]:
+                out: list[tuple[float, str | None, str, _Prepared]] = []
+                for target in candidates:
+                    if target.column["id"] == col["id"]:
+                        continue
+                    if is_own_pk and target.table["id"] == table["id"]:
+                        continue
+                    if not _families_compatible(source.family, target.family):
+                        continue
+                    hit = _score_prepared(source, target)
+                    if hit is None:
+                        continue
+                    score, role, reason = hit
+                    # A table's own single PK only references another table in 1:1 extension tables.
+                    out.append((score - 0.2 if is_own_pk else score, role, reason, target))
+                return out
+
+            found = score_all(index.candidates(source))
+            if not found or max(item[0] for item in found) <= _FUZZY_FLOOR:
+                matched = {item[3].column["id"] for item in found}
+                found += score_all(target for target in index.fuzzy_candidates(source) if target.column["id"] not in matched)
+            if found:
+                # The old loop appended candidates in target order and sorted by score (stable), so
+                # an equal score keeps the earlier target. Sorting by (-score, position) reproduces
+                # that order without walking the targets this column did not match.
+                found.sort(key=lambda item: (-item[0], index.order[item[3].column["id"]]))
+                top = found[0][0]
+                candidates.extend(
+                    Candidate(
+                        source={**col, "table": table},
+                        target={**target.column, "table": target.table},
+                        name_score=score,
+                        role=role,
+                        reasons=[reason],
+                    )
+                    for score, role, reason, target in found
+                    if score >= top - 0.1
+                )
             elif id_like and not is_own_pk and col["name"] not in pk and not names_own_table(col["name"], table["name"]):
                 unlinked.append({"table": table, "column": col})
     return candidates, unlinked

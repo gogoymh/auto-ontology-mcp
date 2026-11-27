@@ -64,12 +64,17 @@ def _shared_parent_note(shared: dict[str, Any]) -> str:
     )
 
 
+# The prepared documents cost about 0.9 KB per field (measured at 20,000 documents). A cache entry
+# is kept below this size, so a large catalog is rebuilt per call rather than held in memory.
+DOCS_CACHE_MAX_FIELDS = 20_000
+
+
 class OntologyService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.store = Store(settings.store_path)
         self.connections = Connections(settings.query_timeout_s, oracle_client_lib=settings.oracle_client_lib)
-        self.scanner = Scanner(self.store, self.connections, settings.profile_sample_rows)
+        self.scanner = Scanner(self.store, self.connections, settings.profile_sample_rows, settings.scan_workers)
         vec_path = settings.store_path.with_name(f"{settings.store_path.stem}.vectors.sqlite")
         self.vectors = VectorIndex(
             vec_path,
@@ -78,7 +83,13 @@ class OntologyService:
             cache_dir=settings.embedding_cache_dir,
         )
         self._synced_ontology_digest: dict[str, tuple[str, str]] = {}
+        # The per-revision cached document list last synced per datasource: the same list object
+        # means the same documents, so the vector sync skips hashing every document again.
+        self._synced_docs: dict[str, tuple[Any, list[Any]]] = {}
         self.knowledge = Knowledge(self)
+        # Documents are rebuilt per search today; one entry per datasource, keyed on the store's
+        # revision, removes the rebuild without ever serving a stale set.
+        self._docs_cache: dict[str, tuple[int, list[Any]]] = {}
 
     def semantic_status(self) -> dict[str, Any]:
         return self.vectors.status()
@@ -1152,6 +1163,14 @@ class OntologyService:
 
     # ================================================================== reading
     def _docs(self, ds: dict[str, Any]):
+        # The revision moves with every committed write to the store, so one number says whether the
+        # documents read a moment ago still describe the ontology. The knowledge datasource also
+        # carries the knowledge store's sources, which this revision does not track, so it is rebuilt.
+        cacheable = ds["name"] != KNOWLEDGE_DS
+        revision = self.store.revision() if cacheable else 0
+        cached = self._docs_cache.get(ds["id"]) if cacheable else None
+        if cached is not None and cached[0] == revision:
+            return cached[1]
         relations = self.store.all(
             """
             SELECT r.source_term_id, r.relation, t.name AS target_name FROM term_relation r
@@ -1159,7 +1178,7 @@ class OntologyService:
             """,
             (ds["id"],),
         )
-        return build_docs(
+        docs = build_docs(
             self.store.terms(ds["id"]),
             self.store.attributes_for_datasource(ds["id"]),
             self.store.sql_attributes_for_datasource(ds["id"]),
@@ -1169,8 +1188,21 @@ class OntologyService:
             relations=relations,
             sources=self.knowledge.sources_for_search() if ds["name"] == KNOWLEDGE_DS else [],
         )
+        fields = sum(len(doc.prepared) for doc in docs)
+        if not cacheable:
+            return docs
+        if fields <= DOCS_CACHE_MAX_FIELDS:
+            self._docs_cache[ds["id"]] = (revision, docs)
+        else:
+            # The prepared documents cost about 0.9 KB per field; past this point the server keeps
+            # its memory flat and rebuilds instead.
+            self._docs_cache.pop(ds["id"], None)
+        return docs
 
     def _sync_ontology_vectors(self, ds: dict[str, Any], docs: list[Doc]) -> None:
+        last = self._synced_docs.get(ds["id"])
+        if last is not None and last[0] is self.vectors and last[1] is docs and self.vectors.path.exists():
+            return
         by_kind: dict[str, dict[str, str]] = {k: {} for k in SEARCH_DOC_KINDS}
         digest_parts: list[str] = []
         for doc in docs:
@@ -1187,6 +1219,7 @@ class OntologyService:
         for kind, items in by_kind.items():
             self.vectors.sync_items(scope, kind, items)
         self._synced_ontology_digest[ds["id"]] = cache_key
+        self._synced_docs[ds["id"]] = (self.vectors, docs)
 
     def _search(
         self,

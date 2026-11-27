@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import fnmatch
 import logging
+import threading
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Iterable
 
@@ -105,11 +107,22 @@ class TableFilter:
         return not any(self._hit(p, s, t) for p in self.exclude)
 
 
+@dataclass
+class _Probe:
+    """What profiling one table read, before anything is written to the store."""
+
+    stats: dict[str, dict[str, Any]]
+    row_count: Any
+    warnings: list[str]
+    ok: bool
+
+
 class Scanner:
-    def __init__(self, store: Store, connections: Connections, sample_rows: int) -> None:
+    def __init__(self, store: Store, connections: Connections, sample_rows: int, workers: int = 1) -> None:
         self.store = store
         self.connections = connections
         self.sample_rows = sample_rows
+        self.workers = max(1, workers)
 
     # ------------------------------------------------------------------ helpers
     def _run(self, ds: dict[str, Any], sql: str, max_rows: int | None = None) -> list[list[Any]]:
@@ -129,9 +142,12 @@ class Scanner:
         profile: bool = True,
         infer: bool = True,
         tables: TableFilter | None = None,
+        workers: int | None = None,
     ) -> dict[str, Any]:
         """Read the schema. With *tables*, only matching tables and views are read; tables
-        scanned earlier that fall outside the filter stay in the catalog untouched."""
+        scanned earlier that fall outside the filter stay in the catalog untouched. *workers*
+        reads and profiles that many tables at once; the result does not depend on it."""
+        workers = max(1, workers or self.workers)
         engine = self.connections.engine(ds)
         backend = engine.dialect.name
         dialect = engine.dialect
@@ -169,6 +185,7 @@ class Scanner:
                 shadow = {f"{v}{suffix}" for v in virtual for suffix in SQLITE_SHADOW_SUFFIXES}
             except Exception:  # noqa: BLE001
                 shadow = set()
+        tasks: list[tuple[Any, Any, str]] = []
         for schema in schema_list:
             try:
                 names = [(n, "table") for n in inspector.get_table_names(schema=schema)]
@@ -183,36 +200,62 @@ class Scanner:
                 if tables is not None and not tables.matches(native(schema), native(name), login_schema):
                     skipped += 1
                     continue
-                try:
-                    cols = inspector.get_columns(name, schema=schema)
-                    pk = (inspector.get_pk_constraint(name, schema=schema) or {}).get("constrained_columns") or []
-                    fks = inspector.get_foreign_keys(name, schema=schema) if kind == "table" else []
-                except Exception as exc:  # noqa: BLE001
-                    warnings.append(f"Could not read {schema or ''}.{name}: {short_error(exc)}; its catalog entry is kept")
-                    unread.add((native(schema) or "", native(name)))
-                    continue
-                try:
-                    comment = (inspector.get_table_comment(name, schema=schema) or {}).get("text")
-                except Exception:
-                    comment = None
-                # Store names as the database spells them (Oracle: CUSTOMERS, not customers).
-                cols = [{**c, "name": native(c["name"])} for c in cols]
-                fks = [
-                    {
-                        **fk,
-                        "constrained_columns": native_cols(fk.get("constrained_columns")),
-                        "referred_columns": native_cols(fk.get("referred_columns")),
-                        "referred_table": native(fk.get("referred_table")),
-                        "referred_schema": native(fk.get("referred_schema")),
-                    }
-                    for fk in fks
-                ]
-                extracted.append(
-                    {
-                        "schema": native(schema) or "", "name": native(name), "kind": kind, "columns": cols,
-                        "pk": native_cols(pk), "fks": fks, "comment": comment,
-                    }
-                )
+                tasks.append((schema, name, kind))
+
+        # Reflection is four round trips per table. Each thread gets its own Inspector: SQLAlchemy's
+        # is not thread safe, while the engine and its pool are.
+        local = threading.local()
+
+        def read_table(task: tuple[Any, Any, str]) -> tuple[dict[str, Any] | None, str | None, tuple[str, str] | None]:
+            schema, name, kind = task
+            found = getattr(local, "inspector", None)
+            if found is None:
+                found = local.inspector = sa.inspect(engine)  # type: ignore[attr-defined]
+            try:
+                cols = found.get_columns(name, schema=schema)
+                pk = (found.get_pk_constraint(name, schema=schema) or {}).get("constrained_columns") or []
+                fks = found.get_foreign_keys(name, schema=schema) if kind == "table" else []
+            except Exception as exc:  # noqa: BLE001
+                warning = f"Could not read {schema or ''}.{name}: {short_error(exc)}; its catalog entry is kept"
+                return None, warning, (native(schema) or "", native(name))
+            try:
+                comment = (found.get_table_comment(name, schema=schema) or {}).get("text")
+            except Exception:  # noqa: BLE001
+                comment = None
+            # Store names as the database spells them (Oracle: CUSTOMERS, not customers).
+            cols = [{**c, "name": native(c["name"])} for c in cols]
+            fks = [
+                {
+                    **fk,
+                    "constrained_columns": native_cols(fk.get("constrained_columns")),
+                    "referred_columns": native_cols(fk.get("referred_columns")),
+                    "referred_table": native(fk.get("referred_table")),
+                    "referred_schema": native(fk.get("referred_schema")),
+                }
+                for fk in fks
+            ]
+            return (
+                {
+                    "schema": native(schema) or "", "name": native(name), "kind": kind, "columns": cols,
+                    "pk": native_cols(pk), "fks": fks, "comment": comment,
+                },
+                None,
+                None,
+            )
+
+        if workers > 1 and len(tasks) > 1:
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="scan") as pool:
+                read = list(pool.map(read_table, tasks))
+        else:
+            read = [read_table(task) for task in tasks]
+        # Merged in table order, so the catalog rows and the warnings read the same whatever the
+        # threads did first.
+        for record, warning, unread_key in read:
+            if warning is not None:
+                warnings.append(warning)
+                unread.add(unread_key)  # type: ignore[arg-type]
+            if record is not None:
+                extracted.append(record)
 
         if tables is not None and not extracted:
             warnings.append(f"The table filter {', '.join(tables.patterns)} matched no table or view.")
@@ -225,8 +268,11 @@ class Scanner:
         if profile:
             # Only what this scan read: earlier areas of a filtered catalog are not re-profiled.
             scanned = set(table_ids.values())
-            for table in self.store.tables(ds["id"]):
-                if table["id"] in scanned and self._profile_table(ds, table, warnings):
+            targets = [table for table in self.store.tables(ds["id"]) if table["id"] in scanned]
+            for table, probe in self._probe_all(ds, targets, workers):
+                warnings.extend(probe.warnings)
+                if probe.ok:
+                    self._commit_probe(table, probe)
                     profiled += 1
 
         inferred_summary: dict[str, Any] = {}
@@ -373,9 +419,40 @@ class Scanner:
                             )
 
     def _profile_table(self, ds: dict[str, Any], table: dict[str, Any], warnings: list[str]) -> bool:
+        """Profile one table in place (the knowledge store refreshes its catalog this way)."""
+        probe = self._probe_table(ds, table)
+        warnings.extend(probe.warnings)
+        if not probe.ok:
+            return False
+        self._commit_probe(table, probe)
+        return True
+
+    def _probe_all(self, ds: dict[str, Any], tables: list[dict[str, Any]], workers: int) -> list[tuple[dict[str, Any], _Probe]]:
+        """Probe each table (reads only) and return the results in table order.
+
+        One failing table must not stop the scan, so the failure is a probe that carries the
+        warning, exactly as the serial loop produced it.
+        """
+
+        def run(table: dict[str, Any]) -> _Probe:
+            try:
+                return self._probe_table(ds, table)
+            except Exception as exc:  # noqa: BLE001
+                return _Probe({}, None, [f"Profiling {table['name']} failed: {short_error(exc)}"], False)
+
+        if workers > 1 and len(tables) > 1:
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="profile") as pool:
+                return list(zip(tables, pool.map(run, tables)))
+        return [(table, run(table)) for table in tables]
+
+    def _probe_table(self, ds: dict[str, Any], table: dict[str, Any]) -> _Probe:
+        """Read what profiling needs for one table: samples, a row count, small value sets.
+
+        Nothing here writes to the store, so any number of these can run at once.
+        """
         columns = self.store.columns(table["id"])
         if not columns:
-            return False
+            return _Probe({}, None, [], False)
         qualified = self._qualify(table)
         dialect = sqlglot_dialect(ds.get("dialect"))
         try:
@@ -383,8 +460,7 @@ class Scanner:
                 ds, transpile(f"SELECT * FROM {qualified} LIMIT {self.sample_rows}", dialect), max_rows=self.sample_rows
             )
         except Exception as exc:  # noqa: BLE001
-            warnings.append(f"Profiling {table['name']} failed: {short_error(exc)}")
-            return False
+            return _Probe({}, None, [f"Profiling {table['name']} failed: {short_error(exc)}"], False)
         stats = profile_rows(columns, result.columns, result.rows)
         row_count = None
         try:
@@ -392,49 +468,52 @@ class Scanner:
         except Exception:  # noqa: BLE001
             pass
 
-        by_name = {c["name"]: c for c in columns}
+        for name, column_stats in stats.items():
+            if not column_stats["needs_distinct_probe"]:
+                continue
+            try:
+                quoted = quote_ident(name)
+                rows = self._run(
+                    ds,
+                    f"SELECT DISTINCT {quoted} FROM {qualified} WHERE {quoted} IS NOT NULL LIMIT {LOW_CARDINALITY_MAX + 1}",
+                )
+                values = [r[0] for r in rows]
+                if len(values) <= LOW_CARDINALITY_MAX:
+                    merged = list(column_stats["sample_values"])
+                    for value in values:
+                        if value not in merged and not (isinstance(value, str) and len(value) > 60):
+                            merged.append(value)
+                    column_stats["sample_values"] = merged
+                    column_stats["value_set_complete"] = True
+            except Exception:  # noqa: BLE001
+                pass
+        return _Probe(stats, row_count, [], True)
+
+    def _commit_probe(self, table: dict[str, Any], probe: _Probe) -> None:
+        """Write one table's profile. Serial, in table order, in one transaction."""
+        by_name = {c["name"]: c for c in self.store.columns(table["id"])}
         with self.store.tx() as con:
-            for name, s in stats.items():
+            for name, s in probe.stats.items():
                 col = by_name.get(name)
                 if not col:
                     continue
-                samples = s["sample_values"]
-                complete = False
-                if s["needs_distinct_probe"]:
-                    try:
-                        q = quote_ident(name)
-                        rows = self._run(
-                            ds,
-                            f"SELECT DISTINCT {q} FROM {qualified} WHERE {q} IS NOT NULL LIMIT {LOW_CARDINALITY_MAX + 1}",
-                        )
-                        values = [r[0] for r in rows]
-                        if len(values) <= LOW_CARDINALITY_MAX:
-                            merged = list(samples)
-                            for v in values:
-                                if v not in merged and not (isinstance(v, str) and len(v) > 60):
-                                    merged.append(v)
-                            samples = merged
-                            complete = True
-                    except Exception:  # noqa: BLE001
-                        pass
                 self.store.update(
                     "catalog_column",
                     col["id"],
                     {
-                        "sample_values": samples,
+                        "sample_values": s["sample_values"],
                         "is_unique": s["is_unique"],
                         "null_fraction": s["null_fraction"],
                         "distinct_in_sample": s["distinct_in_sample"],
                         "min_value": s["min_value"],
                         "max_value": s["max_value"],
                         "format": s["format"],
-                        "value_set_complete": complete,
+                        "value_set_complete": bool(s.get("value_set_complete")),
                         "list_separator": s.get("list_separator"),
                     },
                     con,
                 )
-            self.store.update("catalog_table", table["id"], {"row_count": row_count, "profiled_at": now()}, con)
-        return True
+            self.store.update("catalog_table", table["id"], {"row_count": probe.row_count, "profiled_at": now()}, con)
 
     # --------------------------------------------------------------- inference
     def infer_relationships(
