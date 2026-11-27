@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from functools import lru_cache
 
 _CAMEL_1 = re.compile(r"(?<=[A-Z])(?=[A-Z][a-z])")
 _CAMEL_2 = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
@@ -116,9 +117,16 @@ def tokens(text: str, *, drop_stopwords: bool = True) -> list[str]:
     return out
 
 
-def trigrams(text: str) -> set[str]:
+@lru_cache(maxsize=4096)
+def trigrams(text: str) -> frozenset[str]:
+    """The trigrams of *text*, with two spaces in front and one behind.
+
+    Memoized because a search compares the same field tokens over and over: one query against a
+    300-table catalog makes about 220,000 comparisons over 330 distinct strings. The result is a
+    frozenset because every caller gets the same object back and must not change it.
+    """
     s = f"  {normalize_text(text)} "
-    return {s[i : i + 3] for i in range(len(s) - 2)}
+    return frozenset(s[i : i + 3] for i in range(len(s) - 2))
 
 
 def trigram_similarity(a: str, b: str) -> float:

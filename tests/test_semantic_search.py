@@ -476,3 +476,32 @@ def test_vector_index_fastembed_wrapper_uses_lazy_cache(monkeypatch, tmp_path):
     semantic.FastEmbedder("test/model", cache_dir=tmp_path).embed_query("again")
     assert len(created) == 1
     semantic._MODEL_CACHE.clear()
+
+
+def test_hybrid_search_reuses_cached_revision_docs(settings, tmp_path, monkeypatch):
+    # The vector sync gets the per-revision cached document list; handed the same list again,
+    # it returns without re-hashing every document.
+    import auto_ontology_mcp.service as service_mod
+
+    svc = OntologyService(settings)
+    ds = {"id": "ds1", "name": "shop"}
+    texts: list[str] = []
+    real_doc_text = service_mod.doc_text
+    monkeypatch.setattr(service_mod, "doc_text", lambda d: texts.append(d.id) or real_doc_text(d))
+
+    class Vec:
+        model_name = "m"
+        path = tmp_path / "s.vectors.sqlite"
+
+        def sync_items(self, scope, kind, items):
+            pass
+
+    Vec.path.write_text("")
+    svc.vectors = Vec()
+    docs = [Doc("term", "t1", "Customer", [("Customer", 1.0)])]
+    svc._sync_ontology_vectors(ds, docs)
+    assert texts == ["t1"]
+    svc._sync_ontology_vectors(ds, docs)
+    assert texts == ["t1"]
+    svc._sync_ontology_vectors(ds, list(docs))
+    assert texts == ["t1", "t1"]

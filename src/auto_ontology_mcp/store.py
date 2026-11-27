@@ -20,6 +20,14 @@ from typing import Any, Iterator
 SCHEMA = """
 PRAGMA foreign_keys = ON;
 
+-- A counter that moves with every committed write, so a cache can tell whether the rows it read
+-- are still the rows in the store. Bumped inside the transaction that writes.
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO meta (key, value) VALUES ('revision', 0);
+
 CREATE TABLE IF NOT EXISTS datasource (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
@@ -276,6 +284,10 @@ class Store:
             con.execute("PRAGMA foreign_keys = ON")
             try:
                 yield con
+                if con.total_changes:
+                    # A write happened in this transaction: move the revision in the same commit, so a
+                    # reader never sees the new rows with the old revision (or the reverse).
+                    con.execute("UPDATE meta SET value = value + 1 WHERE key = 'revision'")
                 con.commit()
             except BaseException:
                 con.rollback()
@@ -296,6 +308,12 @@ class Store:
         with self.tx() as con:
             row = con.execute(sql, params).fetchone()
             return row[0] if row else None
+
+    def revision(self) -> int:
+        """A counter that moves with every committed write, for caches keyed on the store."""
+        with self.tx() as con:
+            row = con.execute("SELECT value FROM meta WHERE key = 'revision'").fetchone()
+        return int(row[0]) if row else 0
 
     def insert(self, table: str, values: dict[str, Any], con: sqlite3.Connection | None = None) -> None:
         cols = list(values)
