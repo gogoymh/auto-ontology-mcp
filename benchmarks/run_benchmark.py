@@ -1059,7 +1059,22 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Also compare lexical-only and hybrid (fastembed + sqlite-vec) recall and latency on the semantic task set.",
     )
     parser.add_argument("--format", choices=("text", "markdown", "json"), default="text", help="Output format.")
+    parser.add_argument(
+        "--summary-file",
+        type=Path,
+        default=None,
+        help="Append the markdown comparison to this file (e.g. $GITHUB_STEP_SUMMARY in CI).",
+    )
     return parser
+
+
+def _append_summary(path: Path | None, cmp: dict[str, Any]) -> None:
+    """Append the markdown comparison so CI shows it on the run page even when the step fails."""
+    if path is None or not str(path):
+        return
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(_format_compare_markdown(cmp) + "\n")
+    logger.info("benchmark comparison summary appended to %s (status=%s)", path, cmp["status"])
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1082,6 +1097,7 @@ def main(argv: list[str] | None = None) -> int:
             print(_format_compare_markdown(cmp))
         else:
             print(_format_compare_text(cmp))
+        _append_summary(args.summary_file, cmp)
         return 1 if cmp["failed"] else 0
 
     result = run_benchmark(args.tasks, warmup=args.warmup, iterations=args.iterations)
@@ -1114,6 +1130,7 @@ def main(argv: list[str] | None = None) -> int:
             print(_format_compare_markdown(cmp))
         else:
             print(_format_compare_text(cmp))
+        _append_summary(args.summary_file, cmp)
         if args.semantic and args.format != "json":
             print()
             print(_format_semantic_markdown(result["semantic_search"]) if args.format == "markdown" else _format_semantic_text(result["semantic_search"]))
