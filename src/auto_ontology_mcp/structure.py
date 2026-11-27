@@ -247,6 +247,223 @@ def missing_aggregation(
     return out
 
 
+# ------------------------------------------------------------ cartesian product
+class _Groups:
+    """Union-find over the sources of one scope, keyed by the name the query uses for each."""
+
+    def __init__(self, keys: list[str]) -> None:
+        self._parent = {key: key for key in keys}
+
+    def find(self, key: str) -> str:
+        while self._parent[key] != key:
+            self._parent[key] = self._parent[self._parent[key]]
+            key = self._parent[key]
+        return key
+
+    def union(self, first: str, second: str) -> None:
+        left, right = self.find(first), self.find(second)
+        if left != right:
+            self._parent[right] = left
+
+    def groups(self) -> list[list[str]]:
+        out: dict[str, list[str]] = {}
+        for key in self._parent:
+            out.setdefault(self.find(key), []).append(key)
+        return list(out.values())
+
+
+def _is_table(source: Any) -> bool:
+    """A physical table: not a CTE or derived table, and not a table-valued function."""
+    return isinstance(source, exp.Table) and isinstance(source.this, exp.Identifier)
+
+
+def _source_tables(scope: Scope) -> dict[str, exp.Table]:
+    """The physical tables the scope reads, keyed by the name the query gives them.
+
+    Two aliases of one table are two entries: ``orders o1 JOIN orders o2`` reads the table twice
+    and pairs both halves.
+    """
+    return {name: source for name, source in scope.sources.items() if _is_table(source)}
+
+
+def _source_label(name: str, table: exp.Table) -> str:
+    """How a warning names a source: the table, and the alias when the query gives it one."""
+    qualified = f"{table.db}.{table.name}" if table.db else table.name
+    return qualified if name.casefold() == table.name.casefold() else f"{qualified} AS {name}"
+
+
+def _alias_of(column: exp.Column, sources: dict[str, Any], lookup: Lookup | None) -> str | None:
+    """The source a column comes from, when this scope can tell without guessing."""
+    if column.table:
+        folded = column.table.casefold()
+        return next((name for name in sources if name.casefold() == folded), None)
+    if len(sources) == 1:
+        return next(iter(sources))
+    if lookup is None:
+        return None
+    owners = [
+        name
+        for name, source in sources.items()
+        if _is_table(source) and lookup(PhysicalColumn(source.db or "", source.name, column.name))
+    ]
+    return owners[0] if len(owners) == 1 else None
+
+
+def _side_owner(node: exp.Expression | None, select: exp.Select, sources: dict[str, Any], lookup: Lookup | None) -> str | None:
+    """The one source every column in *node* comes from; None when it has none or mixes sources."""
+    if node is None:
+        return None
+    columns = [node] if isinstance(node, exp.Column) else node.find_all(exp.Column)
+    owners: set[str] = set()
+    for column in columns:
+        if column.find_ancestor(exp.Select) is not select:
+            continue  # a subquery of this scope has its own sources
+        owner = _alias_of(column, sources, lookup)
+        if owner is None:
+            return None
+        owners.add(owner)
+    return owners.pop() if len(owners) == 1 else None
+
+
+def _conjuncts(node: exp.Expression):
+    """The AND-separated parts of a predicate: each one states how some rows relate."""
+    while isinstance(node, exp.Paren):
+        node = node.this
+    if isinstance(node, exp.And):
+        yield from _conjuncts(node.left)
+        yield from _conjuncts(node.right)
+    else:
+        yield node
+
+
+def cartesian_products(tree: exp.Expression, lookup: Lookup | None = None, hint: Callable[[str, str], str | None] | None = None) -> list[str]:
+    """Sources read side by side that no predicate ties together.
+
+    A CROSS JOIN, a JOIN with no ON and a comma in FROM pair every row of one source with every row
+    of the other. The join checks and the containment probe do not see it when the two value ranges
+    overlap, so the query answers with a multiplied count or an inflated sum. *hint* returns a known
+    join between two tables, used as the example condition in the message.
+    """
+    out: list[str] = []
+    for scope in _scopes(tree):
+        select = scope.expression
+        if not isinstance(select, exp.Select):
+            continue
+        # Every source of the scope: physical tables, CTEs and derived tables. A CTE or a derived
+        # table carries a link between the tables it is joined to, so they all take part.
+        sources: dict[str, Any] = dict(scope.sources)
+        physical = _source_tables(scope)
+        if len(sources) < 2:
+            continue
+        groups = _Groups(list(sources))
+
+        def union_all(names: list[str]) -> None:
+            unique = list(dict.fromkeys(names))
+            for other in unique[1:]:
+                groups.union(unique[0], other)
+
+        def sources_in(node: exp.Expression) -> list[str]:
+            names: list[str] = []
+            for column in node.find_all(exp.Column):
+                if column.find_ancestor(exp.Select) is not select:
+                    continue  # a subquery of this scope has its own sources
+                name = _alias_of(column, sources, lookup)
+                if name is not None:
+                    names.append(name)
+            return names
+
+        predicates: list[exp.Expression] = []
+        where = select.args.get("where")
+        if where is not None:
+            predicates.extend(_conjuncts(where.this))
+        joins = list(select.args.get("joins") or [])
+        for join in joins:
+            on = join.args.get("on")
+            if on is not None:
+                predicates.extend(_conjuncts(on))
+        # Any operator or function counts. A conjunct that names two sources ties them, whether it
+        # is `=`, `LIKE`, `IS NOT DISTINCT FROM`, a comparison of a function's result, or an
+        # arithmetic expression with one table's columns on one side.
+        for predicate in predicates:
+            names = sources_in(predicate)
+            if len(set(names)) >= 2:
+                union_all(names)
+        for join in joins:
+            key = next((name for name in sources if name.casefold() == join.this.alias_or_name.casefold()), None)
+            if key is None or not isinstance(join.this, exp.Table):
+                continue
+            # USING and NATURAL tie the joined table to the tables on its left. The columns of an
+            # ON predicate were traced above. Either way the table is not left on its own.
+            if join.args.get("using") or str(join.args.get("method") or "").upper() == "NATURAL":
+                union_all([key, *[name for name in sources if name != key]])
+        # Only physical tables are reported: a CTE or a derived table answers for itself in its own
+        # scope, and a bridge through one shows up here as the tables it connects.
+        components = [[name for name in component if name in physical] for component in groups.groups()]
+        components = [component for component in components if component]
+        if len(components) <= 1:
+            continue
+        labels = {name: _source_label(name, table) for name, table in physical.items()}
+
+        def example(name: str) -> str | None:
+            """A known join from *name* to another source, if the caller knows one."""
+            if hint is None:
+                return None
+            for other, table in physical.items():
+                if other == name:
+                    continue
+                found = hint(physical[name].name, table.name)
+                if found:
+                    return found
+            return None
+
+        lonely = [name for component in components if len(component) == 1 for name in component]
+        if lonely and len(lonely) == len(physical):
+            message = (
+                f"Tables {', '.join(labels[name] for name in lonely)} are read in the same FROM/JOIN list with no "
+                f"predicate linking them, so every row of one pairs with every row of the other (cartesian product): "
+                f"counts come back multiplied and sums inflated."
+            )
+        elif lonely:
+            if len(lonely) == 1:
+                subject = f"Table {labels[lonely[0]]} appears in the FROM/JOIN list"
+                pronoun, those = "it", "that table"
+            else:
+                subject = f"Tables {', '.join(labels[name] for name in lonely)} appear in the FROM/JOIN list"
+                pronoun, those = "them", "those tables"
+            message = (
+                f"{subject} but no predicate links {pronoun} to the rest, so every row of {those} pairs with every "
+                f"row of the others (cartesian product): counts come back multiplied and sums inflated."
+            )
+        else:
+            names = [labels[component[0]] for component in components]
+            message = (
+                f"The tables {', '.join(names)} are read in groups with no predicate between the groups, so every "
+                f"row of one group pairs with every row of the others (cartesian product): counts come back "
+                f"multiplied and sums inflated."
+            )
+        details: list[str] = []
+        for join in joins:
+            on = join.args.get("on")
+            key = next((name for name in sources if name.casefold() == join.this.alias_or_name.casefold()), None)
+            if on is None or key not in lonely:
+                continue
+            owner = _side_owner(on, select, sources, lookup)
+            if owner is not None and owner != key:
+                # owner can be a CTE or a derived table, which has a name but no table label.
+                details.append(f"The ON clause {on.sql()} compares only columns of {labels.get(owner, owner)}.")
+        if lonely:
+            suggestion = example(lonely[0])
+            if suggestion:
+                message += f" Add a condition that ties the tables together, for example {suggestion}."
+            else:
+                message += " Add a condition that ties the tables together, or remove the unlinked table from the query."
+        else:
+            message += " Add a condition that ties the groups together."
+        if details:
+            message += " " + " ".join(details[:2])
+        out.append(message)
+    return out
+
 # ------------------------------------------------------- mixed-case identifiers
 def quote_mixed_case(
     tree: exp.Expression, dialect: str | None, catalog_columns: list[dict[str, Any]]

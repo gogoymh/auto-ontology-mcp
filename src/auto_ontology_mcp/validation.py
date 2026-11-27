@@ -134,6 +134,18 @@ class Validator:
                 return r, False
         return None
 
+    def _join_hint(self, first: str, second: str) -> str | None:
+        """A relationship between two tables, as the example condition a warning suggests."""
+        pair = {first.casefold(), second.casefold()}
+        columns = {c["id"]: c for c in self.catalog_columns}
+        for rel in self.rels:
+            a = columns.get(rel["source_column_id"])
+            b = columns.get(rel["target_column_id"])
+            if a is None or b is None or {a["table_name"].casefold(), b["table_name"].casefold()} != pair:
+                continue
+            return f"{a['table_name']}.{a['name']} = {b['table_name']}.{b['name']}"
+        return None
+
     # ------------------------------------------------------------------- main
     def validate(self, sql: str, *, probe: bool = True, scale: bool = False, question: str | None = None) -> dict[str, Any]:
         """Check *sql*. probe runs every data probe (literals, scale, dry run); scale runs only the
@@ -177,6 +189,7 @@ class Validator:
         self._check_branch_fanout(analysis, fanned, warnings)
         self._check_list_columns(analysis, warnings)
         if analysis.qualified:
+            warnings += structure.cartesian_products(analysis.tree, self._col, self._join_hint)
             warnings += structure.integer_divisions(analysis.tree, self.dialect, self._col)
             warnings += structure.vacuous_group_by(analysis.tree, self.dialect, self._col)
             warnings += structure.missing_aggregation(
