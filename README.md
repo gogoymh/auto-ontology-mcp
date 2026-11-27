@@ -647,6 +647,7 @@ Over HTTP, a token is required to reach the server from anywhere but localhost: 
 | `AUTO_ONTOLOGY_SCAN_TABLES` | unset | Default table filter for scans, comma-separated globs (`SALES_*,HR.EMP*,!*_LOG`). Unset: every table. See [Large schemas](#large-schemas) |
 | `AUTO_ONTOLOGY_ORACLE_CLIENT_LIB` | unset | Oracle thick mode (for native network encryption): Instant Client directory, or `1` for the client on the library path. Unset: thin mode. Both need Oracle 12.1+ |
 | `AUTO_ONTOLOGY_PROFILE_ROWS` | `1000` | Rows sampled per table while profiling |
+| `AUTO_ONTOLOGY_SCAN_WORKERS` | `1` | Tables a scan reads and profiles at once. 1 keeps the scan serial; 2 to 4 make a scan of a network database faster, at the same number of connections to it |
 | `AUTO_ONTOLOGY_ALLOW_DATASOURCE_TOOLS` | `1` | `0` hides `add_datasource` and `scan_datasource` from MCP |
 | `AUTO_ONTOLOGY_TOOLSETS` | `all` | Tool groups to expose, comma-separated: `answer` (always on), `model`, `knowledge`, `share` |
 | `AUTO_ONTOLOGY_MCP_TOKEN` | unset | Token required by the HTTP transport (same as `--token`) |

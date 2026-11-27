@@ -86,6 +86,10 @@ class Settings:
     client found on the library path, for servers that enforce native network encryption. Unset: python-oracledb
     thin mode (no client install). Both modes need Oracle 12.1+."""
 
+    scan_workers: int = 1
+    """Tables a scan reads and profiles in parallel (AUTO_ONTOLOGY_SCAN_WORKERS). 1 keeps it serial,
+    which is the right default for a database that is not ours to load."""
+
     scan_tables: tuple[str, ...] = ()
     """Default table filter for scans (AUTO_ONTOLOGY_SCAN_TABLES, comma-separated globs such as
     ``SALES_*,HR.EMP*,!*_LOG``). Empty: every table. A datasource's own filter or the scan's
@@ -105,6 +109,7 @@ class Settings:
             max_rows=max(1, _int("AUTO_ONTOLOGY_MAX_ROWS", 500)),
             query_timeout_s=max(1, _int("AUTO_ONTOLOGY_QUERY_TIMEOUT_S", 30)),
             profile_sample_rows=max(10, _int("AUTO_ONTOLOGY_PROFILE_ROWS", 1000)),
+            scan_workers=max(1, min(8, _int("AUTO_ONTOLOGY_SCAN_WORKERS", 1))),
             allow_datasource_tools=_bool("AUTO_ONTOLOGY_ALLOW_DATASOURCE_TOOLS", True),
             token=os.environ.get("AUTO_ONTOLOGY_MCP_TOKEN") or None,
             host=os.environ.get("AUTO_ONTOLOGY_MCP_HOST", "127.0.0.1"),

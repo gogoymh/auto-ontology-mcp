@@ -73,7 +73,7 @@ class OntologyService:
         self.settings = settings
         self.store = Store(settings.store_path)
         self.connections = Connections(settings.query_timeout_s, oracle_client_lib=settings.oracle_client_lib)
-        self.scanner = Scanner(self.store, self.connections, settings.profile_sample_rows)
+        self.scanner = Scanner(self.store, self.connections, settings.profile_sample_rows, settings.scan_workers)
         self.knowledge = Knowledge(self)
         # Documents are rebuilt per search today; one entry per datasource, keyed on the store's
         # revision, removes the rebuild without ever serving a stale set.
