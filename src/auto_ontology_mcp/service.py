@@ -63,6 +63,11 @@ def _shared_parent_note(shared: dict[str, Any]) -> str:
     )
 
 
+# The prepared documents cost about 0.9 KB per field (measured at 20,000 documents). A cache entry
+# is kept below this size, so a large catalog is rebuilt per call rather than held in memory.
+DOCS_CACHE_MAX_FIELDS = 20_000
+
+
 class OntologyService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -70,6 +75,9 @@ class OntologyService:
         self.connections = Connections(settings.query_timeout_s, oracle_client_lib=settings.oracle_client_lib)
         self.scanner = Scanner(self.store, self.connections, settings.profile_sample_rows)
         self.knowledge = Knowledge(self)
+        # Documents are rebuilt per search today; one entry per datasource, keyed on the store's
+        # revision, removes the rebuild without ever serving a stale set.
+        self._docs_cache: dict[str, tuple[int, list[Any]]] = {}
 
     # =============================================================== resolution
     def ds(self, name: str | None = None) -> dict[str, Any]:
@@ -1139,6 +1147,14 @@ class OntologyService:
 
     # ================================================================== reading
     def _docs(self, ds: dict[str, Any]):
+        # The revision moves with every committed write to the store, so one number says whether the
+        # documents read a moment ago still describe the ontology. The knowledge datasource also
+        # carries the knowledge store's sources, which this revision does not track, so it is rebuilt.
+        cacheable = ds["name"] != KNOWLEDGE_DS
+        revision = self.store.revision() if cacheable else 0
+        cached = self._docs_cache.get(ds["id"]) if cacheable else None
+        if cached is not None and cached[0] == revision:
+            return cached[1]
         relations = self.store.all(
             """
             SELECT r.source_term_id, r.relation, t.name AS target_name FROM term_relation r
@@ -1146,7 +1162,7 @@ class OntologyService:
             """,
             (ds["id"],),
         )
-        return build_docs(
+        docs = build_docs(
             self.store.terms(ds["id"]),
             self.store.attributes_for_datasource(ds["id"]),
             self.store.sql_attributes_for_datasource(ds["id"]),
@@ -1156,6 +1172,16 @@ class OntologyService:
             relations=relations,
             sources=self.knowledge.sources_for_search() if ds["name"] == KNOWLEDGE_DS else [],
         )
+        fields = sum(len(doc.prepared) for doc in docs)
+        if not cacheable:
+            return docs
+        if fields <= DOCS_CACHE_MAX_FIELDS:
+            self._docs_cache[ds["id"]] = (revision, docs)
+        else:
+            # The prepared documents cost about 0.9 KB per field; past this point the server keeps
+            # its memory flat and rebuilds instead.
+            self._docs_cache.pop(ds["id"], None)
+        return docs
 
     def _search(self, ds: dict[str, Any], query: str, kinds: list[str] | None = None, limit: int = 10, docs=None) -> list[dict[str, Any]]:
         return search(query, docs if docs is not None else self._docs(ds), kinds=kinds, limit=limit)

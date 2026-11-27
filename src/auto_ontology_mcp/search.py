@@ -17,6 +17,15 @@ from .naming import QUESTION_WORDS, normalize_text, tokens, trigram_similarity
 KINDS = ("term", "attribute", "sql_attribute", "glossary", "table", "example", "source")
 
 
+@dataclass(frozen=True)
+class Field:
+    """A field's text, tokenized and normalized once, when its document is built."""
+
+    tokens: frozenset[str]
+    norm: str
+    weight: float
+
+
 @dataclass
 class Doc:
     kind: str
@@ -24,6 +33,17 @@ class Doc:
     title: str
     fields: list[tuple[str, float]]
     payload: dict[str, Any] = field(default_factory=dict)
+    prepared: list[Field] = field(init=False, repr=False, default_factory=list)
+
+    def __post_init__(self) -> None:
+        # Scoring a document used to tokenize every field on every query, and a question is scored
+        # against every document once per entity. The tokens do not change, so they are made here.
+        # An empty text or one with no tokens scores 0, and dropping it changes nothing: the
+        # second-best bonus adds 0 for it.
+        for text, weight in self.fields:
+            found = tokens(text) if text else []
+            if found:
+                self.prepared.append(Field(frozenset(found), normalize_text(text), weight))
 
 
 def _token_match(q: str, f_set: set[str]) -> float:
@@ -42,14 +62,9 @@ def _token_match(q: str, f_set: set[str]) -> float:
 
 
 def _field_score(
-    q_tokens: list[str], q_norm: str, text: str, dropped: list[str] | None = None
+    q_tokens: list[str], q_norm: str, field: Field, dropped: list[str] | None = None
 ) -> float:
-    if not text:
-        return 0.0
-    f_tokens = tokens(text)
-    if not f_tokens:
-        return 0.0
-    f_set = set(f_tokens)
+    f_set = field.tokens
     matches = [_token_match(q, f_set) for q in q_tokens]
     # A question word the field itself carries is part of the name the caller asked
     # for ("Order No", "Has Children"), so it counts like any other query token, but
@@ -61,8 +76,7 @@ def _field_score(
     matches += [1.0] * len(present)
     unmatched = len(dropped or []) - len(present)
     coverage = sum(matches) / len(q_tokens)
-    norm_text = normalize_text(text)
-    if len(q_norm) >= 3 and q_norm in norm_text:
+    if len(q_norm) >= 3 and q_norm in field.norm:
         coverage = max(coverage, 1.0)
     # Prefer tight matches: "Order" beats "Order Line" for the query "order".
     extra = max(0, len(f_set) - len(set(q_tokens))) + unmatched
@@ -84,7 +98,7 @@ def score(query: str, doc: Doc) -> float:
     if not q_tokens:
         return 0.0
     q_norm = normalize_text(query).strip()
-    scored = sorted((_field_score(q_tokens, q_norm, text, dropped) * w for text, w in doc.fields), reverse=True)
+    scored = sorted((_field_score(q_tokens, q_norm, field, dropped) * field.weight for field in doc.prepared), reverse=True)
     if not scored:
         return 0.0
     best = scored[0] + (0.15 * scored[1] if len(scored) > 1 else 0.0)
