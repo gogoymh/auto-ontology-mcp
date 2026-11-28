@@ -1,7 +1,8 @@
 """Regression check of scripts/lint_report.py on real report sentences.
 
-tests/data/lint_samples.jsonl holds 30 samples taken from past grading notes ('채점' documents)
-and mission completion reports, criteria and requests. Each line gives the text, the sentences
+tests/data/lint_samples.jsonl holds 43 samples taken from past grading notes ('채점' documents)
+and mission completion reports, criteria and requests. s01-s30 mostly guard against false positives;
+s31-s43 are sentences the lint used to miss (AOM-49) and guard recall. Each line gives the text, the sentences
 the lint must split it into (after quoted spans are masked, as lint() does) and the pattern ids
 it must report. A sentence cut in the wrong place or a pattern flagged or missed fails here.
 """
@@ -24,9 +25,9 @@ from lint_report import lint, mask, sentences  # noqa: E402
 IDS = [s["id"] for s in SAMPLES]
 
 
-def test_samples_are_thirty_real_reports() -> None:
-    assert len(SAMPLES) == 30
-    assert len(set(IDS)) == 30
+def test_samples_are_real_reports() -> None:
+    assert len(SAMPLES) == 43
+    assert len(set(IDS)) == 43
     for s in SAMPLES:
         assert re.search(r"AOM-\d+ (채점|완료 보고|완료 기준|요청)", s["source"]), s
         assert re.search(r"[가-힣]", s["text"]), s
@@ -48,6 +49,44 @@ def test_sample_findings(sample: dict) -> None:
     extra = set(got) - set(sample["kinds"])
     missed = set(sample["kinds"]) - set(got)
     assert not extra and not missed, f"{sample['id']} flagged wrongly {sorted(extra)}, missed {sorted(missed)}"
+
+
+def test_samples_guard_recall() -> None:
+    """Enough true findings that a pattern the lint stops reporting fails here, not only a new false one."""
+    flagged = [s for s in SAMPLES if s["kinds"]]
+    assert len(flagged) >= 15, len(flagged)
+    kinds = {k for s in flagged for k in s["kinds"]}
+    for kind in ("translationese", "crammed", "empty", "english", "nominal", "nounstack"):
+        assert kind in kinds, kind
+
+
+@pytest.mark.parametrize(
+    "text,kind",
+    [
+        ("작업을 마쳤습니다 (작업: 빈 보고와 한자어 판정).", "empty"),  # trailing note kept in the sentence
+        ("PR을 병합했습니다: I merged the branch and pushed the tag to origin.", "english"),
+        ("`a.py` 3개와 `b.py` 4개, 합계 7개가 통과합니다.", "crammed"),
+        ("어제 대비 지연이 줄었습니다.", "translationese"),
+        ("결과를 문서에 반영했습니다.", "nominal"),
+        ("기준 2는 미충족입니다.", "nounstack"),
+    ],
+)
+def test_missed_patterns_now_flagged(text: str, kind: str) -> None:
+    assert kind in {k for k, _ in lint(text)}, lint(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "작업을 마쳤습니다 (작업: AOM-25 채점). 75점에서 82점으로 올렸습니다.",  # a result after the note
+        "이미 반영돼 있습니다.",  # 반영돼 있다 is a state, not a vague change
+        "`a.py`와 `b.py`를 고쳤습니다.",  # two files without numbers
+        "대비표를 붙였습니다.",
+        "README의 Search is lexical 문장을 고쳤습니다.",  # a short English phrase
+    ],
+)
+def test_widened_patterns_keep_clean_text(text: str) -> None:
+    assert not lint(text), lint(text)
 
 
 def test_inner_da_unquoted_keeps_sentence() -> None:
