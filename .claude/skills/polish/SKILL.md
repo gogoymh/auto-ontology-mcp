@@ -1,6 +1,6 @@
 ---
 name: polish
-description: Rewrite text an agent wrote for people (channel messages, mission reasons, completion reports, issue comments, docs, UI copy) so it reads like a person wrote it, without changing its meaning. Use before posting any Korean message or report (run the pre-report check in this skill before mission_finish, issue review comments and channel posts), and when reviewing agent text for translationese, crammed lists, English reports in Korean channels, long chained sentences, noun stacks, self-ratings, or reports that only say the work finished. Keep the numbered patterns between five and seven.
+description: Rewrite text an agent wrote for people (channel messages, mission reasons, completion reports, issue titles and bodies, docs, UI copy) so it reads like a person wrote it, without changing its meaning. Use before posting any Korean message or report (run the pre-report check in this skill before mission_finish, issue review comments, issue titles and bodies, channel posts and doc_write), and when reviewing agent text for translationese, crammed lists, English reports in Korean channels, long chained sentences, noun stacks, self-ratings, or reports that only say the work finished. Keep the numbered patterns between five and seven.
 ---
 
 # polish
@@ -161,6 +161,22 @@ description: Rewrite text an agent wrote for people (channel messages, mission r
 고친 뒤:
 > 리뷰를 마쳤습니다. #28은 병합해도 됩니다.
 
+## 제목에 쓰는 말 (title)
+
+이슈 제목은 보드와 채널에 한 줄로 올라가고, 길면 '…'으로 잘린다. 제목에는 사용자가 얻는 결과나 고칠 문제를 쓴다. 파일 경로, 명령과 옵션(`--compare`), '작업:' 같은 머리말은 제목에서 빼고 본문에 쓴다. 제목은 50자 안으로 쓰고, '…'이나 '...'으로 끝내지 않는다. 번호 패턴 1~7은 제목에도 그대로 본다. 훅은 issue_create와 issue_update의 title에서 이 규칙을 함께 점검한다.
+
+고치기 전:
+> 작업: .github/workflows/ci.yml에 benchmarks/run_benchmark.py --comp…
+
+고친 뒤:
+> CI에서 벤치마크를 기준선과 비교하기
+
+고치기 전:
+> scripts/polish_hook.py TOOLS에 issue_create, doc_write 추가
+
+고친 뒤:
+> 이슈 제목과 본문, 문서에도 윤문 점검 훅 걸기
+
 ## 함께 지킬 것
 
 - 가운뎃점(·)으로 명사를 묶지 않는다. '구현·검증·병합'은 '구현하고 검증해 병합'으로 쓴다.
@@ -176,7 +192,7 @@ description: Rewrite text an agent wrote for people (channel messages, mission r
 3. 상태 0(`ok: no polish patterns found`)이 나올 때까지 1과 2를 되풀이한다.
 4. 고치기 전과 뒤의 수치, 파일 이름, 티켓 번호, 명령이 같은지 대조한 뒤 올린다.
 
-세 도구는 훅이 대신 점검한다. `.claude/settings.json`에 건 `scripts/polish_hook.py`가 mission_finish의 summary와 next, issue_update의 comment, message_post의 text에서 패턴을 찾으면 호출을 막고, 찾은 줄과 그 패턴의 고친 예를 보여 준다. 예처럼 문장만 고쳐 다시 부른다.
+다섯 도구는 훅이 대신 점검한다. `.claude/settings.json`에 건 `scripts/polish_hook.py`가 mission_finish의 summary와 next, issue_update의 comment와 title과 body, message_post의 text, issue_create의 title과 body, doc_write의 text에서 패턴을 찾으면 호출을 막고, 찾은 줄과 그 패턴의 고친 예를 보여 준다. 예처럼 문장만 고쳐 다시 부른다.
 
 스크립트는 패턴을 찾을 뿐 고치지 않는다. 일부러 남긴 표현이라 판단하면 그대로 올려도 되지만, 그 줄이 왜 괜찮은지 스스로 설명할 수 있어야 한다.
 
@@ -207,6 +223,7 @@ description: Rewrite text an agent wrote for people (channel messages, mission r
 - [ ] 한자어 명사: '향후', '~ 시', '미설치', '비활성화', '기존'을 동사로 풀었다. '시간'과 '3시'는 그대로 둔다. (패턴 5)
 - [ ] 평가어: '명확한', '완결할 수 있는'을 지우고 근거 사실을 썼다. '불명확한'은 그대로 둔다. (패턴 6)
 - [ ] 빈 보고: 끝났다는 말 뒤에 결과 한 문장이 있다. 인사나 부탁은 결과가 아니다. (패턴 7)
+- [ ] 제목: 파일 경로, 명령, '작업:' 머리말이 없고 50자 안이며 '…'으로 끝나지 않는다. (제목)
 - [ ] 가운뎃점과 명사형 동사('구축', '연동')를 쓰지 않았다. (함께 지킬 것)
 - [ ] 옮겨 온 말(고친 표현, 사용자의 말, 로그)은 따옴표나 코드 블록, 인용문으로 감쌌다.
 - [ ] 수치, 이름, 번호가 고치기 전과 같고, 없던 판단을 더하지 않았다.
