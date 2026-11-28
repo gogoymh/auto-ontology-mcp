@@ -67,22 +67,33 @@ concept's body or save_example_query. export_wiki writes the store as Obsidian p
 originals.
 
 """
-_SEARCH = """\
+_SEARCH_LEXICAL = """\
 Search is lexical, not semantic. Search with the words the schema uses; if the user writes in \
 another language, translate entity phrases to the ontology's language first, and try synonyms. \
 Add the user's own words as Term synonyms with update_term so the next search finds them.
 """
+_SEARCH_HYBRID = """\
+Search is hybrid: search_ontology and search_text fuse lexical matching with local embeddings \
+(search_mode "hybrid"), so synonyms, paraphrases and other languages already match. Search once \
+with the user's own words; do not translate or retry with synonyms unless the results miss. \
+Add the user's own words as Term synonyms with update_term when they name a Term exactly.
+"""
 
 
-def server_instructions(toolsets: frozenset[str] | set[str] | None = None) -> str:
-    """The handshake instructions, without the parts for tool groups the server does not expose."""
+def server_instructions(
+    toolsets: frozenset[str] | set[str] | None = None, *, semantic: bool = False
+) -> str:
+    """The handshake instructions, without the parts for tool groups the server does not expose.
+
+    ``semantic`` is ``svc.semantic_status()["enabled"]``: the search paragraph then says search is
+    hybrid instead of telling the model to translate and retry with synonyms."""
     on = toolsets or TOOLSETS
     parts = [_INTRO, _ANSWERING]
     if "model" in on:
         parts.append(_BUILDING)
     if "knowledge" in on:
         parts.append(_KNOWLEDGE)
-    parts.append(_SEARCH)
+    parts.append(_SEARCH_HYBRID if semantic else _SEARCH_LEXICAL)
     return "".join(parts)
 
 
