@@ -23,6 +23,19 @@ docker run -d --rm --name aomcp-pg -e POSTGRES_PASSWORD=pw -p 55432:5432 postgre
 AO_TEST_PG_URL=postgresql+psycopg://postgres:pw@127.0.0.1:55432/postgres uv run --extra postgres pytest
 ```
 
+## Benchmark and latency baseline
+
+CI runs `benchmarks/run_benchmark.py --compare benchmarks/baseline.json --repeats 5` and fails when a quality score drops or when any p50 latency is more than 2.5x the baseline and more than 2 ms slower. The baseline is measured on GitHub-hosted runners, the same machines CI uses, so a laptop run is only a rough guide (`uv run python benchmarks/run_benchmark.py --compare benchmarks/baseline.json`).
+
+When a change makes something slower on purpose, or a new task changes the scores, re-measure the baseline in the same pull request:
+
+```bash
+gh workflow run benchmark-baseline.yml --ref <your-branch>   # three runners, default mode and --semantic --iterations 10
+gh run download <run-id> -n baseline -D benchmarks            # writes benchmarks/baseline.json
+```
+
+Pushing the branch as `baseline/<name>` starts the same workflow. Commit the new `benchmarks/baseline.json` and update the latency quoted in the README limits if `semantic_search` moved.
+
 ## Pull requests
 
 1. Fork the repository and create a branch from `main`. Name it after the change (`fix-percent-warning`, not `patch-1`).

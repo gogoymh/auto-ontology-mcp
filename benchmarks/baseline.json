@@ -1,12 +1,12 @@
 {
   "schema_version": 2,
   "tasks_version": "1",
-  "git_commit": "f1c7706",
-  "measured_at": "2026-11-28T05:43:41+00:00",
+  "git_commit": "598a8f1",
+  "measured_at": "2026-11-28T08:07:40+00:00",
   "python_version": "3.12.16",
   "warmup": 1,
-  "iterations": 5,
-  "repeats": 5,
+  "iterations": 3,
+  "repeats": 15,
   "hybrid_embedder": "bench-hash-v1",
   "overall_score": 1.0,
   "scores": {
@@ -968,98 +968,993 @@
       ]
     }
   },
+  "machines": 3,
+  "environments": [
+    {
+      "github_actions": true,
+      "os": "Linux 7.0.0-1020-azure",
+      "cpu": "AMD EPYC 7763 64-Core Processor",
+      "cpu_count": 4,
+      "runner_image": "ubuntu26 20261122.9.1",
+      "runner_name": "GitHub Actions 1000000662",
+      "label": "runner-1",
+      "run_url": "https://github.com/gogoymh/auto-ontology-mcp/actions/runs/46124293641/attempts/1"
+    },
+    {
+      "github_actions": true,
+      "os": "Linux 7.0.0-1020-azure",
+      "cpu": "AMD EPYC 9V45 96-Core Processor",
+      "cpu_count": 4,
+      "runner_image": "ubuntu26 20261122.9.1",
+      "runner_name": "GitHub Actions 1000000664",
+      "label": "runner-2",
+      "run_url": "https://github.com/gogoymh/auto-ontology-mcp/actions/runs/46124293641/attempts/1"
+    },
+    {
+      "github_actions": true,
+      "os": "Linux 7.0.0-1020-azure",
+      "cpu": "AMD EPYC 9V74 80-Core Processor",
+      "cpu_count": 4,
+      "runner_image": "ubuntu26 20261122.9.1",
+      "runner_name": "GitHub Actions 1000000663",
+      "label": "runner-3",
+      "run_url": "https://github.com/gogoymh/auto-ontology-mcp/actions/runs/46124293641/attempts/1"
+    }
+  ],
   "latency_ms": {
     "scan_and_infer": {
-      "mean": 117.971,
-      "p50": 106.368,
-      "p95": 164.478,
-      "count": 25,
+      "mean": 125.433,
+      "p50": 119.004,
+      "p95": 143.022,
+      "count": 45,
       "p50_runs": [
-        273.799,
-        106.368,
-        94.544,
-        77.087,
-        162.241
+        146.729,
+        192.101,
+        142.942,
+        145.808,
+        133.806,
+        146.424,
+        101.964,
+        99.515,
+        93.923,
+        99.973,
+        121.978,
+        113.795,
+        112.691,
+        119.004,
+        146.431
+      ],
+      "p50_machines": [
+        145.808,
+        99.973,
+        119.004
       ]
     },
     "ontology_search": {
-      "mean": 6.726,
-      "p50": 2.742,
-      "p95": 35.03,
-      "count": 375,
+      "mean": 6.624,
+      "p50": 2.239,
+      "p95": 38.046,
+      "count": 675,
       "p50_runs": [
-        3.522,
-        2.137,
-        2.742,
-        2.007,
-        4.805
+        2.76,
+        2.935,
+        2.845,
+        2.758,
+        2.745,
+        1.631,
+        1.747,
+        1.68,
+        1.645,
+        1.628,
+        2.228,
+        2.239,
+        2.279,
+        2.2,
+        2.26
+      ],
+      "p50_machines": [
+        2.76,
+        1.645,
+        2.239
       ]
     },
     "fulltext_search": {
-      "mean": 2.9,
-      "p50": 2.633,
-      "p95": 3.753,
-      "count": 300,
+      "mean": 1.887,
+      "p50": 1.795,
+      "p95": 2.47,
+      "count": 540,
       "p50_runs": [
-        3.177,
-        1.84,
-        2.633,
-        1.884,
-        4.047
+        2.223,
+        2.202,
+        2.24,
+        2.221,
+        2.211,
+        1.455,
+        1.507,
+        1.54,
+        1.412,
+        1.407,
+        1.782,
+        1.787,
+        1.815,
+        1.795,
+        1.938
+      ],
+      "p50_machines": [
+        2.221,
+        1.455,
+        1.795
       ]
     },
     "check_answerable": {
-      "mean": 12.001,
-      "p50": 6.592,
-      "p95": 35.541,
-      "count": 300,
+      "mean": 12.436,
+      "p50": 5.244,
+      "p95": 40.067,
+      "count": 540,
       "p50_runs": [
-        14.946,
-        6.307,
-        6.592,
-        5.29,
-        10.884
+        6.451,
+        6.805,
+        6.891,
+        6.508,
+        6.737,
+        4.059,
+        4.049,
+        4.024,
+        3.896,
+        4.293,
+        5.095,
+        5.104,
+        5.244,
+        5.328,
+        5.399
+      ],
+      "p50_machines": [
+        6.737,
+        4.049,
+        5.244
       ]
     },
     "validate_sql": {
-      "mean": 7.993,
-      "p50": 7.638,
-      "p95": 11.773,
-      "count": 650,
+      "mean": 7.478,
+      "p50": 7.389,
+      "p95": 12.524,
+      "count": 1170,
       "p50_runs": [
-        10.693,
-        7.218,
-        7.638,
-        6.375,
-        10.939
+        8.56,
+        8.609,
+        8.657,
+        8.484,
+        8.325,
+        5.319,
+        5.383,
+        5.302,
+        5.492,
+        5.354,
+        6.928,
+        6.739,
+        7.389,
+        8.529,
+        7.723
+      ],
+      "p50_machines": [
+        8.56,
+        5.354,
+        7.389
       ]
     },
     "vector_sync": {
-      "mean": 16.915,
-      "p50": 15.248,
-      "p95": 22.522,
-      "count": 25,
+      "mean": 18.709,
+      "p50": 16.988,
+      "p95": 21.155,
+      "count": 45,
       "p50_runs": [
-        16.78,
-        15.248,
-        10.052,
-        14.06,
-        20.748
+        24.302,
+        23.411,
+        21.146,
+        25.508,
+        19.497,
+        15.729,
+        15.289,
+        14.027,
+        25.196,
+        19.863,
+        51.622,
+        16.988,
+        19.241,
+        16.801,
+        16.275
+      ],
+      "p50_machines": [
+        23.411,
+        15.729,
+        16.988
       ]
     },
     "hybrid_search": {
-      "mean": 10.021,
-      "p50": 4.379,
-      "p95": 46.527,
-      "count": 375,
+      "mean": 8.638,
+      "p50": 3.739,
+      "p95": 42.672,
+      "count": 675,
       "p50_runs": [
-        3.913,
-        4.379,
-        3.468,
-        4.605,
-        7.148
+        4.823,
+        4.922,
+        4.828,
+        4.827,
+        4.873,
+        2.812,
+        2.815,
+        2.617,
+        2.797,
+        2.723,
+        3.739,
+        3.636,
+        3.741,
+        3.879,
+        3.738
+      ],
+      "p50_machines": [
+        4.828,
+        2.797,
+        3.739
       ]
     },
-    "total_suite_ms": 7153.951
+    "total_suite_ms": 5860.789
+  },
+  "semantic_search": {
+    "tasks_total": 27,
+    "recall_k": 3,
+    "iterations": 10,
+    "runs": 3,
+    "modes": {
+      "lexical": {
+        "search_mode": "lexical",
+        "recall_at_3": 0.4,
+        "mrr": 0.38,
+        "recall_by_group": {
+          "cross_lingual": 0.0,
+          "paraphrase": 0.8333,
+          "synonym": 0.7143
+        },
+        "negative_precision": 1.0,
+        "passed": 12,
+        "total": 27,
+        "cold_pass_ms": 116.071,
+        "latency_ms": {
+          "mean": 4.081,
+          "p50": 2.353,
+          "p95": 3.498,
+          "count": 810,
+          "p50_runs": [
+            2.985,
+            1.805,
+            2.353
+          ]
+        },
+        "tasks": [
+          {
+            "id": "sem_syn_client_accounts",
+            "group": "synonym",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "Customer"
+            ],
+            "actual_top3": [
+              "Customer"
+            ]
+          },
+          {
+            "id": "sem_syn_staff_member",
+            "group": "synonym",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "Employee"
+            ],
+            "actual_top3": [
+              "Employee"
+            ]
+          },
+          {
+            "id": "sem_syn_sales_staff",
+            "group": "synonym",
+            "passed": true,
+            "rank": 2,
+            "expected_any": [
+              "Employee"
+            ],
+            "actual_top3": [
+              "Order › Sales Channel",
+              "Employee",
+              "Region"
+            ]
+          },
+          {
+            "id": "sem_syn_merch_tag",
+            "group": "synonym",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "Tag"
+            ],
+            "actual_top3": [
+              "Tag",
+              "Tag › Tag ID",
+              "Tag › Tag Name"
+            ]
+          },
+          {
+            "id": "sem_syn_best_selling",
+            "group": "synonym",
+            "passed": false,
+            "rank": null,
+            "expected_any": [
+              "Bestseller Tag"
+            ],
+            "actual_top3": []
+          },
+          {
+            "id": "sem_syn_turnover",
+            "group": "synonym",
+            "passed": false,
+            "rank": null,
+            "expected_any": [
+              "Order Line › Revenue",
+              "Order Line › Net Revenue"
+            ],
+            "actual_top3": []
+          },
+          {
+            "id": "sem_syn_ear_pads",
+            "group": "synonym",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "Ear Cushion Cracking"
+            ],
+            "actual_top3": [
+              "Ear Cushion Cracking",
+              "Noise Cancelling Headphones",
+              "September Stockout"
+            ]
+          },
+          {
+            "id": "sem_para_employees",
+            "group": "paraphrase",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "Employee"
+            ],
+            "actual_top3": [
+              "Employee",
+              "Employee › Employee ID",
+              "Employee › Full Name"
+            ]
+          },
+          {
+            "id": "sem_para_money_made",
+            "group": "paraphrase",
+            "passed": false,
+            "rank": null,
+            "expected_any": [
+              "Order Line › Revenue",
+              "Order Line › Net Revenue"
+            ],
+            "actual_top3": []
+          },
+          {
+            "id": "sem_para_warehouse",
+            "group": "paraphrase",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "January cutover",
+              "Fulfilment Cutover"
+            ],
+            "actual_top3": [
+              "Fulfilment Cutover",
+              "Midwest Sales Decline 2024",
+              "January cutover"
+            ]
+          },
+          {
+            "id": "sem_para_ssd_hot",
+            "group": "paraphrase",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "SSD Heat Slowdown"
+            ],
+            "actual_top3": [
+              "SSD Heat Slowdown",
+              "Portable SSD 1TB",
+              "How tags are assigned"
+            ]
+          },
+          {
+            "id": "sem_para_seat_wobbles",
+            "group": "paraphrase",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "Wobbling Chair Base"
+            ],
+            "actual_top3": [
+              "Wobbling Chair Base",
+              "Office Chair",
+              "September Stockout"
+            ]
+          },
+          {
+            "id": "sem_para_ran_out",
+            "group": "paraphrase",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "September Stockout",
+              "September stockout"
+            ],
+            "actual_top3": [
+              "September Stockout",
+              "September stockout",
+              "Midwest Sales Decline 2024"
+            ]
+          },
+          {
+            "id": "sem_ko_employee_list",
+            "group": "cross_lingual",
+            "passed": false,
+            "rank": null,
+            "expected_any": [
+              "Employee"
+            ],
+            "actual_top3": []
+          },
+          {
+            "id": "sem_ko_city",
+            "group": "cross_lingual",
+            "passed": false,
+            "rank": null,
+            "expected_any": [
+              "City"
+            ],
+            "actual_top3": []
+          },
+          {
+            "id": "sem_ko_city_name",
+            "group": "cross_lingual",
+            "passed": false,
+            "rank": null,
+            "expected_any": [
+              "City › City Name",
+              "City"
+            ],
+            "actual_top3": []
+          },
+          {
+            "id": "sem_ko_product_list",
+            "group": "cross_lingual",
+            "passed": false,
+            "rank": null,
+            "expected_any": [
+              "Product"
+            ],
+            "actual_top3": []
+          },
+          {
+            "id": "sem_ko_product_category",
+            "group": "cross_lingual",
+            "passed": false,
+            "rank": null,
+            "expected_any": [
+              "Product Category"
+            ],
+            "actual_top3": []
+          },
+          {
+            "id": "sem_ko_revenue",
+            "group": "cross_lingual",
+            "passed": false,
+            "rank": null,
+            "expected_any": [
+              "Order Line › Revenue",
+              "Order Line › Net Revenue"
+            ],
+            "actual_top3": []
+          },
+          {
+            "id": "sem_ko_order_status",
+            "group": "cross_lingual",
+            "passed": false,
+            "rank": null,
+            "expected_any": [
+              "Order › Order Status"
+            ],
+            "actual_top3": []
+          },
+          {
+            "id": "sem_ko_chair_wobble",
+            "group": "cross_lingual",
+            "passed": false,
+            "rank": null,
+            "expected_any": [
+              "Wobbling Chair Base",
+              "Office Chair"
+            ],
+            "actual_top3": []
+          },
+          {
+            "id": "sem_ko_headphone_pads",
+            "group": "cross_lingual",
+            "passed": false,
+            "rank": null,
+            "expected_any": [
+              "Ear Cushion Cracking",
+              "Noise Cancelling Headphones"
+            ],
+            "actual_top3": []
+          },
+          {
+            "id": "sem_ko_office_chair",
+            "group": "cross_lingual",
+            "passed": false,
+            "rank": null,
+            "expected_any": [
+              "Office Chair"
+            ],
+            "actual_top3": []
+          },
+          {
+            "id": "sem_ko_bestseller_tag",
+            "group": "cross_lingual",
+            "passed": false,
+            "rank": null,
+            "expected_any": [
+              "Bestseller Tag"
+            ],
+            "actual_top3": []
+          },
+          {
+            "id": "sem_ko_quality_summary",
+            "group": "cross_lingual",
+            "passed": false,
+            "rank": null,
+            "expected_any": [
+              "Product Quality Issue"
+            ],
+            "actual_top3": []
+          },
+          {
+            "id": "sem_neg_physics",
+            "group": "negative",
+            "passed": true,
+            "actual_top3": []
+          },
+          {
+            "id": "sem_neg_quantum_text",
+            "group": "negative",
+            "passed": true,
+            "actual_top3": []
+          }
+        ]
+      },
+      "hybrid": {
+        "search_mode": "hybrid",
+        "recall_at_3": 0.96,
+        "mrr": 0.8733,
+        "recall_by_group": {
+          "cross_lingual": 0.9167,
+          "paraphrase": 1.0,
+          "synonym": 1.0
+        },
+        "negative_precision": 1.0,
+        "passed": 26,
+        "total": 27,
+        "cold_pass_ms": 8915.298,
+        "latency_ms": {
+          "mean": 17.675,
+          "p50": 13.661,
+          "p95": 27.712,
+          "count": 810,
+          "p50_runs": [
+            14.528,
+            9.081,
+            13.661
+          ]
+        },
+        "tasks": [
+          {
+            "id": "sem_syn_client_accounts",
+            "group": "synonym",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "Customer"
+            ],
+            "actual_top3": [
+              "Customer",
+              "Customer › Customer ID",
+              "Customer › Customer Name"
+            ]
+          },
+          {
+            "id": "sem_syn_staff_member",
+            "group": "synonym",
+            "passed": true,
+            "rank": 3,
+            "expected_any": [
+              "Employee"
+            ],
+            "actual_top3": [
+              "Employee › Employee ID",
+              "Employee › Manager ID",
+              "Employee"
+            ]
+          },
+          {
+            "id": "sem_syn_sales_staff",
+            "group": "synonym",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "Employee"
+            ],
+            "actual_top3": [
+              "Employee",
+              "Order › Sales Channel",
+              "Customer"
+            ]
+          },
+          {
+            "id": "sem_syn_merch_tag",
+            "group": "synonym",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "Tag"
+            ],
+            "actual_top3": [
+              "Tag",
+              "Tag › Tag Name",
+              "Tag › Tag ID"
+            ]
+          },
+          {
+            "id": "sem_syn_best_selling",
+            "group": "synonym",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "Bestseller Tag"
+            ],
+            "actual_top3": [
+              "Bestseller Tag",
+              "Source › Title"
+            ]
+          },
+          {
+            "id": "sem_syn_turnover",
+            "group": "synonym",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "Order Line › Revenue",
+              "Order Line › Net Revenue"
+            ],
+            "actual_top3": [
+              "Order Line › Revenue"
+            ]
+          },
+          {
+            "id": "sem_syn_ear_pads",
+            "group": "synonym",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "Ear Cushion Cracking"
+            ],
+            "actual_top3": [
+              "Ear Cushion Cracking",
+              "Noise Cancelling Headphones",
+              "September Stockout"
+            ]
+          },
+          {
+            "id": "sem_para_employees",
+            "group": "paraphrase",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "Employee"
+            ],
+            "actual_top3": [
+              "Employee",
+              "Employee › Employee ID",
+              "Employee › Manager ID"
+            ]
+          },
+          {
+            "id": "sem_para_money_made",
+            "group": "paraphrase",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "Order Line › Revenue",
+              "Order Line › Net Revenue"
+            ],
+            "actual_top3": [
+              "Order Line › Revenue"
+            ]
+          },
+          {
+            "id": "sem_para_warehouse",
+            "group": "paraphrase",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "January cutover",
+              "Fulfilment Cutover"
+            ],
+            "actual_top3": [
+              "January cutover",
+              "Fulfilment Cutover",
+              "Midwest Sales Decline 2024"
+            ]
+          },
+          {
+            "id": "sem_para_ssd_hot",
+            "group": "paraphrase",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "SSD Heat Slowdown"
+            ],
+            "actual_top3": [
+              "SSD Heat Slowdown",
+              "Portable SSD 1TB",
+              "How tags are assigned"
+            ]
+          },
+          {
+            "id": "sem_para_seat_wobbles",
+            "group": "paraphrase",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "Wobbling Chair Base"
+            ],
+            "actual_top3": [
+              "Wobbling Chair Base",
+              "Office Chair",
+              "September Stockout"
+            ]
+          },
+          {
+            "id": "sem_para_ran_out",
+            "group": "paraphrase",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "September Stockout",
+              "September stockout"
+            ],
+            "actual_top3": [
+              "September Stockout",
+              "September stockout",
+              "Midwest Sales Decline 2024"
+            ]
+          },
+          {
+            "id": "sem_ko_employee_list",
+            "group": "cross_lingual",
+            "passed": true,
+            "rank": 2,
+            "expected_any": [
+              "Employee"
+            ],
+            "actual_top3": [
+              "Employee › Employee ID",
+              "Employee",
+              "Employee › Manager ID"
+            ]
+          },
+          {
+            "id": "sem_ko_city",
+            "group": "cross_lingual",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "City"
+            ],
+            "actual_top3": [
+              "City",
+              "City › City Name",
+              "City › City ID"
+            ]
+          },
+          {
+            "id": "sem_ko_city_name",
+            "group": "cross_lingual",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "City › City Name",
+              "City"
+            ],
+            "actual_top3": [
+              "City › City Name",
+              "City",
+              "City › City ID"
+            ]
+          },
+          {
+            "id": "sem_ko_product_list",
+            "group": "cross_lingual",
+            "passed": true,
+            "rank": 2,
+            "expected_any": [
+              "Product"
+            ],
+            "actual_top3": [
+              "Product Category",
+              "Product",
+              "Product › Product Name"
+            ]
+          },
+          {
+            "id": "sem_ko_product_category",
+            "group": "cross_lingual",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "Product Category"
+            ],
+            "actual_top3": [
+              "Product Category",
+              "Product",
+              "Product › Product Name"
+            ]
+          },
+          {
+            "id": "sem_ko_revenue",
+            "group": "cross_lingual",
+            "passed": true,
+            "rank": 2,
+            "expected_any": [
+              "Order Line › Revenue",
+              "Order Line › Net Revenue"
+            ],
+            "actual_top3": [
+              "Product",
+              "Order Line › Revenue",
+              "Tag"
+            ]
+          },
+          {
+            "id": "sem_ko_order_status",
+            "group": "cross_lingual",
+            "passed": false,
+            "rank": null,
+            "expected_any": [
+              "Order › Order Status"
+            ],
+            "actual_top3": [
+              "Tag",
+              "AOV"
+            ]
+          },
+          {
+            "id": "sem_ko_chair_wobble",
+            "group": "cross_lingual",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "Wobbling Chair Base",
+              "Office Chair"
+            ],
+            "actual_top3": [
+              "Wobbling Chair Base",
+              "Office Chair"
+            ]
+          },
+          {
+            "id": "sem_ko_headphone_pads",
+            "group": "cross_lingual",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "Ear Cushion Cracking",
+              "Noise Cancelling Headphones"
+            ],
+            "actual_top3": [
+              "Ear Cushion Cracking",
+              "Noise Cancelling Headphones"
+            ]
+          },
+          {
+            "id": "sem_ko_office_chair",
+            "group": "cross_lingual",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "Office Chair"
+            ],
+            "actual_top3": [
+              "Office Chair",
+              "Wobbling Chair Base"
+            ]
+          },
+          {
+            "id": "sem_ko_bestseller_tag",
+            "group": "cross_lingual",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "Bestseller Tag"
+            ],
+            "actual_top3": [
+              "Bestseller Tag"
+            ]
+          },
+          {
+            "id": "sem_ko_quality_summary",
+            "group": "cross_lingual",
+            "passed": true,
+            "rank": 1,
+            "expected_any": [
+              "Product Quality Issue"
+            ],
+            "actual_top3": [
+              "Product Quality Issue"
+            ]
+          },
+          {
+            "id": "sem_neg_physics",
+            "group": "negative",
+            "passed": true,
+            "actual_top3": []
+          },
+          {
+            "id": "sem_neg_quantum_text",
+            "group": "negative",
+            "passed": true,
+            "actual_top3": []
+          }
+        ],
+        "model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        "min_similarity": 0.5,
+        "model_load_ms": 1705.1,
+        "model_disk_mb": 252.1
+      }
+    },
+    "delta": {
+      "recall_at_3": 0.56,
+      "mrr": 0.4933,
+      "recall_by_group": {
+        "cross_lingual": 0.9167,
+        "paraphrase": 0.1667,
+        "synonym": 0.2857
+      },
+      "p50_ms": 11.308,
+      "p50_ratio": 5.806,
+      "gained": [
+        "sem_ko_bestseller_tag",
+        "sem_ko_chair_wobble",
+        "sem_ko_city",
+        "sem_ko_city_name",
+        "sem_ko_employee_list",
+        "sem_ko_headphone_pads",
+        "sem_ko_office_chair",
+        "sem_ko_product_category",
+        "sem_ko_product_list",
+        "sem_ko_quality_summary",
+        "sem_ko_revenue",
+        "sem_para_money_made",
+        "sem_syn_best_selling",
+        "sem_syn_turnover"
+      ],
+      "lost": []
+    }
   }
 }
