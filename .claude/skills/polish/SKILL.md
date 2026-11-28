@@ -195,6 +195,8 @@ description: Rewrite text an agent wrote for people (channel messages, mission r
 
 여섯 도구는 훅이 대신 점검한다. `.claude/settings.json`에 건 `scripts/polish_hook.py`가 mission_finish의 summary와 next, issue_update의 comment와 title과 body, message_post의 text, issue_create의 title과 body, doc_write의 text, doc_comment의 text에서 패턴을 찾으면 호출을 막고, 찾은 줄과 그 패턴의 고친 예를 보여 준다. 예처럼 문장만 고쳐 다시 부른다.
 
+훅은 막을 때마다 찾은 패턴 하나에 도구, 필드, 패턴 id를 한 줄씩 저장소의 공용 `.git/polish_blocks.jsonl`에 남긴다. 어떤 패턴이 자주 걸리는지는 `python3 scripts/polish_blocks.py`로 보고, `--by tool`이나 `--by field`로 도구와 필드별로도 센다.
+
 스크립트는 패턴을 찾을 뿐 고치지 않는다. 일부러 남긴 표현이라 판단하면 그대로 올려도 되지만, 그 줄이 왜 괜찮은지 스스로 설명할 수 있어야 한다.
 
 ### 점검하지 않는 곳

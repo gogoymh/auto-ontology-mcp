@@ -7,10 +7,17 @@ Reads the hook payload (JSON with tool_name and tool_input) on stdin. When one o
 fields has a pattern from .claude/skills/polish/SKILL.md, it exits 2 so the call is
 blocked and prints, on stderr, each finding with the skill's before/after example, asking the
 agent to rewrite the text without changing its meaning. Exits 0 otherwise (fails open on bad input).
+
+Every block appends one JSON line per finding ({"ts", "tool", "field", "pattern"}) to polish_blocks.jsonl
+in the repository's shared .git folder, so every worktree writes to the same file. POLISH_BLOCK_LOG
+overrides the path. scripts/polish_blocks.py counts the lines per pattern.
 """
 import json
+import os
 import re
+import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -44,6 +51,39 @@ RULES = {"nominal": "명사형 동사", "middot": "가운뎃점"}
 
 def log(msg: str) -> None:
     print(f"[polish_hook] {msg}", file=sys.stderr)
+
+
+def block_log(root: Path = ROOT) -> Path:
+    """Where blocks are recorded: $POLISH_BLOCK_LOG, else the shared .git folder (one file for all worktrees)."""
+    env = os.environ.get("POLISH_BLOCK_LOG")
+    if env:
+        return Path(env)
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=root, capture_output=True, text=True, timeout=5, check=True,
+        ).stdout.strip()
+        return (Path(root) / out).resolve() / "polish_blocks.jsonl"  # out may be relative to root
+    except (OSError, subprocess.SubprocessError) as exc:
+        log(f"no git dir ({exc}); recording in {root}/.git")
+        return root / ".git" / "polish_blocks.jsonl"
+
+
+def record(tool: str, findings: dict, path: Path = None) -> None:
+    """Append one line per finding. A write failure is logged and never changes the hook's verdict."""
+    path = path or block_log()
+    ts = datetime.now().astimezone().isoformat(timespec="microseconds")  # one ts per blocked call
+    lines = [
+        json.dumps({"ts": ts, "tool": tool, "field": field, "pattern": kind}, ensure_ascii=False)
+        for field, found in findings.items()
+        for kind, _ in found
+    ]
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+        log(f"recorded {len(lines)} findings in {path}")
+    except OSError as exc:
+        log(f"could not record blocks in {path} ({exc})")
 
 
 def example(kind: str, skill: str) -> str:
@@ -98,6 +138,7 @@ def main() -> int:
     log(f"tool={tool} fields={','.join(f for f in fields if f in args)} findings={count}")
     if not findings:
         return 0
+    record(name, findings)
     skill = SKILL.read_text(encoding="utf-8") if SKILL.exists() else ""
     print(report(findings, skill, what, name), file=sys.stderr)
     return 2
