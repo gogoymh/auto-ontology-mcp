@@ -110,6 +110,11 @@ class Settings:
     ``SALES_*,HR.EMP*,!*_LOG``). Empty: every table. A datasource's own filter or the scan's
     ``tables`` argument takes precedence."""
 
+    pii_columns: tuple[str, ...] = ()
+    """Columns tagged PII on every datasource (AUTO_ONTOLOGY_PII_COLUMNS, comma-separated globs such as
+    ``email,users.phone,hr.staff.*``; ``!pattern`` removes a tag). Their values are never sampled,
+    stored or returned by the server's own probes."""
+
     toolsets: frozenset[str] = frozenset({"answer", "model", "knowledge", "share"})
     """Tool groups to expose (AUTO_ONTOLOGY_TOOLSETS, comma-separated; default all). A client that only
     asks questions of modeled databases needs 'answer'; fewer tools leave the model more context."""
@@ -148,6 +153,7 @@ class Settings:
             toolsets=_toolsets(os.environ.get("AUTO_ONTOLOGY_TOOLSETS")),
             oracle_client_lib=os.environ.get("AUTO_ONTOLOGY_ORACLE_CLIENT_LIB") or None,
             scan_tables=_patterns(os.environ.get("AUTO_ONTOLOGY_SCAN_TABLES")),
+            pii_columns=_patterns(os.environ.get("AUTO_ONTOLOGY_PII_COLUMNS")),
             semantic_search=_opt_bool("AUTO_ONTOLOGY_SEMANTIC"),
             embedding_model=os.environ.get("AUTO_ONTOLOGY_EMBEDDING_MODEL")
             or "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",

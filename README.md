@@ -619,7 +619,7 @@ Each step of Auto Ontology maps to one side of that line:
 
 Search is lexical by default: token overlap, trigram similarity and phrase match for Terms and columns, and SQLite FTS5 with bm25 for the text of passages, bodies and sources. With the optional `semantic` extra installed, `search_ontology` and `search_text` become hybrid (`search_mode: "hybrid"`): a local `fastembed` model adds vector matches, fused with the lexical ranking, so synonyms, paraphrases and other languages match without translation and without an external API. The server instructions follow the mode. Lexical: search with the schema's vocabulary, translate non-English phrases and try synonyms. Hybrid: search once in the user's own words. Either way the user's words can be added as synonyms with `update_term(add_synonyms=[...])` for a Term or `column_updates=[{column, add_synonyms}]` for a column, after which they match directly. A search that matches nothing by its own words is remembered: when the next search (the model's translation) hits a Term or column, the reply carries `learn.candidates` with the exact `update_term` call that saves the phrase there.
 
-Not carried over from Auto Ontology: the web UI and REST API, users, groups and RBAC, zones (access scoping), tags and rules, PII detection, JSONB path checks, pgvector embedding search (here only the optional local hybrid search above) and reranking, chart generation, KumoRFM predictions and Apache Ossie interchange (export and import use this project's own YAML format). Added here and not in Auto Ontology: write access over MCP, the personal knowledge store (Auto Ontology ingests databases, not documents), concept pages with typed relations, provenance on records, passages with full-text search, originals kept in Obsidian, the Obsidian export, and returning columns added to modeled tables to the model after a re-scan.
+Not carried over from Auto Ontology: the web UI and REST API, users, groups and RBAC, zones (access scoping), tags and rules, automatic PII detection (PII tags here come from the column patterns you give), JSONB path checks, pgvector embedding search (here only the optional local hybrid search above) and reranking, chart generation, KumoRFM predictions and Apache Ossie interchange (export and import use this project's own YAML format). Added here and not in Auto Ontology: write access over MCP, the personal knowledge store (Auto Ontology ingests databases, not documents), concept pages with typed relations, provenance on records, passages with full-text search, originals kept in Obsidian, the Obsidian export, and returning columns added to modeled tables to the model after a re-scan.
 
 ## Safety
 
@@ -634,6 +634,8 @@ The server writes in exactly one place: `~/.auto-ontology-mcp/knowledge.sqlite`,
 3. **Rollback.** Every transaction is rolled back.
 
 Queries time out after 30 seconds and return at most 500 rows (100 by default).
+
+**Personal data.** Tag the columns that hold it with `pii_columns` on `add_datasource` or `scan_datasource`, `--pii-columns` on the CLI, or `AUTO_ONTOLOGY_PII_COLUMNS` (globs: `email`, `users.phone`, `hr.staff.*`; `!users.nickname` removes a tag). A tagged column is left out of the profiling `SELECT`, gets no samples, range or uniqueness in the store, and `lookup_values`, `validate_sql`'s literal and range probes and `check_answerable`'s value search skip it. Tagging a column that was already profiled clears what was stored. A tag stays until a `!` pattern removes it, and when a table's tags cannot be read, its values are not sampled and every stored profile of it is cleared. `run_sql` still returns what the query selects, and join checks count matching keys without returning them.
 
 Over HTTP, a token is required to reach the server from anywhere but localhost: without one, requests addressed to any other host are refused as DNS-rebinding protection, which also means a tunnel will not work until you set `--token`.
 
@@ -653,6 +655,7 @@ Over HTTP, a token is required to reach the server from anywhere but localhost: 
 | `AUTO_ONTOLOGY_MAX_ROWS` | `500` | Upper bound on rows `run_sql` returns |
 | `AUTO_ONTOLOGY_QUERY_TIMEOUT_S` | `30` | Per-query timeout in seconds |
 | `AUTO_ONTOLOGY_SCAN_TABLES` | unset | Default table filter for scans, comma-separated globs (`SALES_*,HR.EMP*,!*_LOG`). Unset: every table. See [Large schemas](#large-schemas) |
+| `AUTO_ONTOLOGY_PII_COLUMNS` | unset | Columns holding personal data on every datasource, comma-separated globs (`email,users.phone,!users.nickname`). Their values are never sampled, stored or probed. See [Safety](#safety) |
 | `AUTO_ONTOLOGY_ORACLE_CLIENT_LIB` | unset | Oracle thick mode (for native network encryption): Instant Client directory, or `1` for the client on the library path. Unset: thin mode. Both need Oracle 12.1+ |
 | `AUTO_ONTOLOGY_PROFILE_ROWS` | `1000` | Rows sampled per table while profiling |
 | `AUTO_ONTOLOGY_SCAN_WORKERS` | `1` | Tables a scan reads and profiles at once. 1 keeps the scan serial; 2 to 4 make a scan of a network database faster, at the same number of connections to it |

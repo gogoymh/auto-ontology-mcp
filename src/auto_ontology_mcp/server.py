@@ -33,6 +33,13 @@ TABLES_ARG = (
     "['*'] reads everything. Default: the datasource's saved filter, else AUTO_ONTOLOGY_SCAN_TABLES, else all tables."
 )
 
+PII_ARG = (
+    "Columns whose values are personal data, as case-insensitive globs: 'email' (that column in every table), "
+    "'users.phone', 'hr.staff.*'; '!users.nickname' removes a tag. Tagged columns are never sampled or stored, and "
+    "lookup_values and validate_sql do not return their values. Saved with the datasource and added to "
+    "AUTO_ONTOLOGY_PII_COLUMNS; a tag stays until a '!' pattern removes it."
+)
+
 DatasourceArg = Annotated[
     str | None,
     Field(description="Datasource name. Optional when only one datasource is registered."),
@@ -202,9 +209,10 @@ def build_server(settings: Settings | None = None, service: OntologyService | No
             schemas: Annotated[list[str] | None, Field(description="Schemas to include (default: all non-system schemas).")] = None,
             scan: Annotated[bool, Field(description="Scan the schema and profile columns immediately after connecting.")] = True,
             tables: Annotated[list[str] | None, Field(description=TABLES_ARG + " Saved with the datasource for later scans.")] = None,
+            pii_columns: Annotated[list[str] | None, Field(description=PII_ARG)] = None,
         ) -> dict[str, Any]:
             """Register a relational database by SQLAlchemy URL, verify read-only connectivity, and optionally scan its schema. Use only when the user supplies a URL; never invent credentials, and use scan_datasource instead to re-read an already registered database. Connections are strictly read-only and never modify the target database. Reusing an existing name updates its URL and saved filter while preserving modeled Terms; fails with the connection or driver error if unreachable."""
-            return svc.add_datasource(name, url, description, schemas, scan, tables)
+            return svc.add_datasource(name, url, description, schemas, scan, tables, pii_columns)
 
         @tool(WRITE_DB, title="Scan database schema and profiles")
         def scan_datasource(
@@ -212,9 +220,10 @@ def build_server(settings: Settings | None = None, service: OntologyService | No
             schemas: Annotated[list[str] | None, Field(description="Limit this scan to these database schemas.")] = None,
             profile: Annotated[bool, Field(description="Sample rows to profile columns and verify inferred joins.")] = True,
             tables: Annotated[list[str] | None, Field(description=TABLES_ARG + " Applies to this scan only.")] = None,
+            pii_columns: Annotated[list[str] | None, Field(description=PII_ARG)] = None,
         ) -> dict[str, Any]:
             """Re-read a registered database's tables, columns, declared keys, column profiles (samples, uniqueness, formats, small value sets), and name-inferred joins verified by value containment. Use after schema changes or to refresh stale profiles; use add_datasource for new databases and get_modeling_worklist to inspect unmodeled tables afterwards. Connects read-only to the database, preserves existing Terms, reviewed relationships, and SQL attributes, refreshes unreviewed inferred joins, and returns counts of newly discovered tables and columns."""
-            return svc.scan_datasource(datasource, schemas, profile, tables)
+            return svc.scan_datasource(datasource, schemas, profile, tables, pii_columns)
 
     # ------------------------------------------------------------- modeling
     @tool(READ, title="Get unmodeled tables worklist")

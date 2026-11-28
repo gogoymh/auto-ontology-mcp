@@ -28,7 +28,7 @@ from .datasources import (
     short_error,
     sqlglot_dialect,
 )
-from .profiling import LOW_CARDINALITY_MAX, profile_rows
+from .profiling import EMPTY_PROFILE, LOW_CARDINALITY_MAX, pii_column_names, profile_rows
 from .sqlcheck import transpile
 from .store import Store, new_id, now
 
@@ -107,6 +107,48 @@ class TableFilter:
         return not any(self._hit(p, s, t) for p in self.exclude)
 
 
+@dataclass(frozen=True)
+class PiiPatterns:
+    """Which columns are tagged PII.
+
+    Case-insensitive globs like :class:`TableFilter`, matched by how many dots a pattern has:
+    ``email`` matches a column name in any table, ``users.*`` a table's columns and
+    ``hr.staff.ssn`` a schema-qualified column. ``!pattern`` removes the tag. A column no pattern
+    names keeps the tag it has, so a client without the patterns never lifts one.
+    """
+
+    include: tuple[str, ...] = ()
+    exclude: tuple[str, ...] = ()
+
+    @classmethod
+    def parse(cls, patterns: str | Iterable[str] | None) -> "PiiPatterns":
+        include: list[str] = []
+        exclude: list[str] = []
+        for item in split_patterns(patterns):
+            negate = item.startswith("!")
+            item = item[1:].strip() if negate else item
+            if item:
+                (exclude if negate else include).append(item.replace("%", "*").casefold())
+        return cls(tuple(include), tuple(exclude))
+
+    def __bool__(self) -> bool:
+        return bool(self.include or self.exclude)
+
+    @staticmethod
+    def _hit(pattern: str, schema: str, table: str, column: str) -> bool:
+        target = {0: column, 1: f"{table}.{column}"}.get(pattern.count("."), f"{schema}.{table}.{column}")
+        return fnmatch.fnmatchcase(target, pattern)
+
+    def decide(self, schema: str | None, table: str, column: str) -> bool | None:
+        """True to tag, False to untag, None to keep the column's current tag."""
+        key = ((schema or "").casefold(), table.casefold(), column.casefold())
+        if any(self._hit(p, *key) for p in self.exclude):
+            return False
+        if any(self._hit(p, *key) for p in self.include):
+            return True
+        return None
+
+
 @dataclass
 class _Probe:
     """What profiling one table read, before anything is written to the store."""
@@ -115,6 +157,18 @@ class _Probe:
     row_count: Any
     warnings: list[str]
     ok: bool
+
+
+def _qualified_label(c: dict[str, Any]) -> str:
+    return f"{c['schema_name']}.{c['table_name']}" if c.get("schema_name") else c["table_name"]
+
+
+def _stored_empty_profile() -> dict[str, Any]:
+    return {k: v for k, v in EMPTY_PROFILE.items() if k != "needs_distinct_probe"}
+
+
+def _holds_values(c: dict[str, Any]) -> bool:
+    return any(c.get(k) not in (None, 0, False) for k in _stored_empty_profile())
 
 
 class Scanner:
@@ -143,6 +197,7 @@ class Scanner:
         infer: bool = True,
         tables: TableFilter | None = None,
         workers: int | None = None,
+        pii: PiiPatterns | None = None,
     ) -> dict[str, Any]:
         """Read the schema. With *tables*, only matching tables and views are read; tables
         scanned earlier that fall outside the filter stay in the catalog untouched. *workers*
@@ -263,6 +318,8 @@ class Scanner:
             ds, extracted, tables, unread=unread, unlisted=unlisted, login_schema=login_schema
         )
         self._sync_declared_fks(ds, extracted, table_ids, warnings)
+        # Tags go on before anything is sampled, so a column named PII is never read.
+        pii_summary = self.tag_pii(ds, pii)
 
         profiled = 0
         if profile:
@@ -291,6 +348,7 @@ class Scanner:
             "tables": len(extracted),
             "columns": sum(len(t["columns"]) for t in extracted),
             "profiled_tables": profiled,
+            **({"pii_columns": pii_summary["pii_columns"]} if pii_summary["pii_columns"] else {}),
             **({"table_filter": tables.patterns, "skipped_by_filter": skipped} if tables is not None else {}),
             **inferred_summary,
             "warnings": warnings[:30],
@@ -418,6 +476,35 @@ class Scanner:
                                 con,
                             )
 
+    def tag_pii(self, ds: dict[str, Any], patterns: PiiPatterns | None) -> dict[str, Any]:
+        """Apply *patterns* to the catalog's PII tags and withhold the values of tagged columns.
+
+        A column tagged after it was profiled keeps nothing profiling derived from its values:
+        a stale ``is_unique`` would still make it a key candidate. Idempotent, and run with no
+        patterns it is the backfill for tags set before this pass existed.
+        """
+        tagged, untagged, cleared = [], [], 0
+        with self.store.tx() as con:
+            for c in self.store.columns_for_datasource(ds["id"]):
+                label = f"{_qualified_label(c)}.{c['name']}"
+                decision = patterns.decide(c.get("schema_name"), c["table_name"], c["name"]) if patterns else None
+                pii = bool(c.get("pii")) if decision is None else decision
+                if pii != bool(c.get("pii")):
+                    self.store.update("catalog_column", c["id"], {"pii": pii}, con)
+                    (tagged if pii else untagged).append(label)
+                if pii and _holds_values(c):
+                    self.store.update("catalog_column", c["id"], _stored_empty_profile(), con)
+                    cleared += 1
+        if tagged or untagged or cleared:
+            logger.info(
+                "PII tags on %s: %d tagged, %d untagged, %d value profiles cleared",
+                ds["name"], len(tagged), len(untagged), cleared,
+            )
+        pii_columns = sorted(
+            f"{_qualified_label(c)}.{c['name']}" for c in self.store.columns_for_datasource(ds["id"]) if c.get("pii")
+        )
+        return {"tagged": tagged, "untagged": untagged, "cleared": cleared, "pii_columns": pii_columns}
+
     def _profile_table(self, ds: dict[str, Any], table: dict[str, Any], warnings: list[str]) -> bool:
         """Profile one table in place (the knowledge store refreshes its catalog this way)."""
         probe = self._probe_table(ds, table)
@@ -453,15 +540,34 @@ class Scanner:
         columns = self.store.columns(table["id"])
         if not columns:
             return _Probe({}, None, [], False)
+        try:
+            pii = pii_column_names(columns)
+        except Exception as exc:  # noqa: BLE001
+            # Guessing that no column is PII would move exactly the values the tags guard.
+            logger.warning("Skipping value sampling of %s: could not read PII tags (%s)", table["name"], exc)
+            return _Probe(
+                {c["name"]: dict(EMPTY_PROFILE) for c in columns},
+                table.get("row_count"),
+                [f"Could not read the PII tags of {table['name']}: its values were not sampled and stored profiles were cleared"],
+                True,
+            )
         qualified = self._qualify(table)
         dialect = sqlglot_dialect(ds.get("dialect"))
-        try:
-            result = self.connections.run_readonly(
-                ds, transpile(f"SELECT * FROM {qualified} LIMIT {self.sample_rows}", dialect), max_rows=self.sample_rows
-            )
-        except Exception as exc:  # noqa: BLE001
-            return _Probe({}, None, [f"Profiling {table['name']} failed: {short_error(exc)}"], False)
-        stats = profile_rows(columns, result.columns, result.rows)
+        selected = [c["name"] for c in columns if c["name"] not in pii]
+        stats: dict[str, dict[str, Any]] = {name: dict(EMPTY_PROFILE) for name in pii}
+        if selected:
+            # PII columns stay out of the SELECT itself, so their values never leave the database.
+            select_list = ", ".join(quote_ident(n) for n in selected) if pii else "*"
+            try:
+                result = self.connections.run_readonly(
+                    ds, transpile(f"SELECT {select_list} FROM {qualified} LIMIT {self.sample_rows}", dialect),
+                    max_rows=self.sample_rows,
+                )
+            except Exception as exc:  # noqa: BLE001
+                return _Probe({}, None, [f"Profiling {table['name']} failed: {short_error(exc)}"], False)
+            stats.update(profile_rows(columns, result.columns, result.rows, pii))
+        else:
+            logger.info("Every column of %s is tagged PII: skipping value sampling", table["name"])
         row_count = None
         try:
             row_count = self._run(ds, f"SELECT COUNT(*) FROM {qualified}")[0][0]
@@ -469,7 +575,7 @@ class Scanner:
             pass
 
         for name, column_stats in stats.items():
-            if not column_stats["needs_distinct_probe"]:
+            if not column_stats.get("needs_distinct_probe") or name in pii:
                 continue
             try:
                 quoted = quote_ident(name)
