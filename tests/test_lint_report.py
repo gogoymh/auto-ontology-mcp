@@ -254,3 +254,28 @@ def test_skill_documents_quote_exclusion() -> None:
     for b, a in zip(before, after):
         assert _run(re.sub(r"^> ?", "", b, flags=re.M)).returncode == 1, b
         assert _run(re.sub(r"^> ?", "", a, flags=re.M)).returncode == 0, a
+
+
+# AOM-35: past handoff and merge posts were flagged as crammed only for particle hints like 을(를).
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Antigravity이(가) 사용 한도에 닿아 미션 AOM-5을(를) Claude(으)로 이어서 합니다.",
+        "미션 AOM-25을(를) 마쳐 병합했습니다: 이제 리뷰 댓글(issue_update의 comment)과 채널 메시지(message_post)도 훅이 막습니다.",
+    ],
+)
+def test_particle_parens_are_not_crammed(text: str) -> None:
+    code, kinds = _kinds(text)
+    assert "crammed" not in kinds, (text, kinds)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "AOM-13을(를) 마쳐 과제 셋(benchmarks/tasks.json)과 스크립트(benchmarks/run_benchmark.py)를 추가했습니다.",
+        "검색(어휘)과 점수(결합)와 색인(증분)을 바꿨습니다.",
+    ],
+)
+def test_particle_parens_keep_real_crammed(text: str) -> None:
+    code, kinds = _kinds(text)
+    assert code == 1 and "crammed" in kinds, (text, kinds)
