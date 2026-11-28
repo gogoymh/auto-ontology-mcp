@@ -11,10 +11,21 @@ import pytest
 
 from auto_ontology_mcp.semantic import semantic_dependencies_available
 
+from strict_skip import REQUIRE_SEMANTIC_ENV, skip_unless_required
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT_PATH = REPO_ROOT / "benchmarks" / "run_benchmark.py"
 
-pytestmark = pytest.mark.skipif(not semantic_dependencies_available(), reason="semantic extra not installed")
+
+
+def require_semantic_extra() -> None:
+    if not semantic_dependencies_available():
+        skip_unless_required("semantic extra not installed", REQUIRE_SEMANTIC_ENV)
+
+
+@pytest.fixture(autouse=True)
+def _require_semantic_extra():
+    require_semantic_extra()
 
 
 def test_cli_semantic_flag_measures_recall_gain_and_latency(tmp_path: Path):

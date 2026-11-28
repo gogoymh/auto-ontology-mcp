@@ -35,13 +35,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/fastembed-cache
-          key: ${{ runner.os }}-fastembed-paraphrase-multilingual-MiniLM-L12-v2-${{ hashFiles('uv.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-fastembed-paraphrase-multilingual-MiniLM-L12-v2-
+          key: ${{ runner.os }}-fastembed-paraphrase-multilingual-MiniLM-L12-v2
       - name: Install semantic extra
         run: uv sync --extra semantic
       - name: Run semantic tests
         run: uv run pytest -q tests/test_semantic_search.py tests/test_benchmark_semantic_model.py
         env:
+          AO_REQUIRE_SEMANTIC: "1"
           AUTO_ONTOLOGY_EMBEDDING_CACHE: ${{ runner.temp }}/fastembed-cache
           FASTEMBED_CACHE_PATH: ${{ runner.temp }}/fastembed-cache
