@@ -16,6 +16,8 @@ from fastmcp import Client
 from auto_ontology_mcp import __version__
 from auto_ontology_mcp.server import TOOL_GROUPS, build_server
 
+from strict_skip import skip_unless_required
+
 ROOT = Path(__file__).resolve().parent.parent
 
 ALLOWED_OPENING_VERBS = {
@@ -224,7 +226,7 @@ def test_release_workflow_and_version():
 def test_release_tags():
     tags, skip_reason = _read_release_tags(ROOT)
     if skip_reason is not None:
-        pytest.skip(skip_reason)
+        skip_unless_required(skip_reason, "CI")
     assert tags is not None
     for expected_tag in ("v0.4.0", "v0.5.0", "v0.6.0", f"v{__version__}"):
         assert tags.get(expected_tag) == "tag", f"annotated git tag {expected_tag} is missing"

@@ -22,6 +22,8 @@ from auto_ontology_mcp.semantic import (
 )
 from auto_ontology_mcp.service import OntologyService
 
+from strict_skip import REQUIRE_SEMANTIC_ENV, skip_unless_required
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -248,7 +250,7 @@ def test_vector_index_respects_scope_and_kind_isolation(tmp_path):
 
 def test_vector_index_sqlite_vec_real_extension_when_installed(tmp_path):
     if not sqlite_vec_available():
-        pytest.skip("sqlite-vec is not installed in this environment")
+        skip_unless_required("sqlite-vec is not installed in this environment", REQUIRE_SEMANTIC_ENV)
     embedder = ConceptEmbedder()
     idx = VectorIndex(tmp_path / "vec0.sqlite", enabled=True, embedder=embedder, use_sqlite_vec=True)
     assert idx.is_available() is True
