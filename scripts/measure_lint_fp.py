@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Measure the polish lint's false-positive rate on past channel posts and issue comments.
+"""Measure the polish lint's false-positive rate on past posts, grading documents, issue bodies and criteria.
 
-Usage: python3 scripts/measure_lint_fp.py [--lint PATH] [--max-fp-rate R] [--keep-tp]
+Usage: python3 scripts/measure_lint_fp.py [--lint PATH] [--max-fp-rate R] [--keep-tp] [--source LIST]
 
-tests/data/lint_reports.jsonl holds the posts (one JSON object per line: id, author, text).
-tests/data/lint_labels.json gives every (post id, pattern id) the lint flags a verdict: tp or fp.
+tests/data/lint_reports.jsonl holds the texts (one JSON object per line: id, text, and source: doc, issue or
+criterion; channel posts and issue comments have no source and count as post). scripts/import_lint_corpus.py adds them.
+tests/data/lint_labels.json gives every (text id, pattern id) the lint flags a verdict: tp or fp. A label with an
+"excerpt" applies to that one finding only, for a long text where findings of one pattern differ.
+--source post,doc measures only those kinds of text.
 Prints a table per pattern and exits 1 when
   - a finding has no verdict (label it before trusting the rate),
   - the false-positive rate is above --max-fp-rate, or
@@ -35,15 +38,21 @@ def load_lint(path: Path):
     return mod.lint
 
 
-def measure(lint, posts: list[dict], labels: dict[tuple[str, str], str]) -> dict:
-    """Count findings per pattern and verdict. A finding is (post id, pattern id)."""
-    findings = [(p["id"], kind) for p in posts for kind, _ in lint(p["text"])]
+def verdict(labels: dict[tuple, str], f: tuple[str, str, str]) -> str:
+    """The excerpt label of finding f, else its (text id, pattern id) label, else 'unlabeled'."""
+    return labels.get(f) or labels.get(f[:2]) or "unlabeled"
+
+
+def measure(lint, posts: list[dict], labels: dict[tuple, str]) -> dict:
+    """Count findings per pattern and verdict. A finding is (text id, pattern id, excerpt)."""
+    findings = [(p["id"], kind, exc) for p in posts for kind, exc in lint(p["text"])]
     counts: Counter = Counter()
-    unlabeled = sorted({f for f in findings if f not in labels})
+    unlabeled = sorted({f[:2] for f in findings if verdict(labels, f) == "unlabeled"})
     for f in findings:
-        counts[(f[1], labels.get(f, "unlabeled"))] += 1
-    flagged = set(findings)
-    lost = sorted(k for k, v in labels.items() if v == "tp" and k not in flagged)
+        counts[(f[1], verdict(labels, f))] += 1
+    ids = {p["id"] for p in posts}
+    flagged = set(findings) | {f[:2] for f in findings}
+    lost = sorted(k[:2] for k, v in labels.items() if v == "tp" and k[0] in ids and k not in flagged)
     total = len(findings)
     fp = sum(n for (_, v), n in counts.items() if v == "fp")
     return {
@@ -64,6 +73,7 @@ def main() -> int:
     ap.add_argument(
         "--keep-tp", action="store_true", help="fail when a finding labeled tp is gone"
     )
+    ap.add_argument("--source", default="", help="comma list of post, doc, issue, criterion (default: all)")
     args = ap.parse_args()
 
     posts = [
@@ -71,8 +81,11 @@ def main() -> int:
         for line in CORPUS.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+    if args.source:
+        keep = set(args.source.split(","))
+        posts = [p for p in posts if p.get("source", "post") in keep]
     labels = {
-        (r["id"], r["kind"]): r["verdict"]
+        (r["id"], r["kind"], r["excerpt"]) if "excerpt" in r else (r["id"], r["kind"]): r["verdict"]
         for r in json.loads(LABELS.read_text(encoding="utf-8"))
     }
     r = measure(load_lint(args.lint), posts, labels)
@@ -85,7 +98,7 @@ def main() -> int:
     rate = r["fp"] / r["total"] if r["total"] else 0.0
     print(f"posts={len(posts)} findings={r['total']} fp={r['fp']} fp_rate={rate:.1%}")
     log(
-        f"lint={args.lint} posts={len(posts)} findings={r['total']} fp={r['fp']} unlabeled={len(r['unlabeled'])} lost_tp={len(r['lost'])}"
+        f"lint={args.lint} source={args.source or 'all'} posts={len(posts)} findings={r['total']} fp={r['fp']} unlabeled={len(r['unlabeled'])} lost_tp={len(r['lost'])}"
     )
 
     ok = True
