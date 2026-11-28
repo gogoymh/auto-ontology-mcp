@@ -35,6 +35,42 @@ RRF_K = 60
 # sit just above it for short synonyms ("turnover" -> "Revenue" 0.517 with the default
 # model), while unrelated queries stay under 0.36.
 ONTOLOGY_MIN_SEMANTIC = 0.50
+# check_answerable needs a confident match, this far above the model's floor.
+ANSWERABLE_MARGIN = 0.25
+# search_ontology pairs a missed phrase with a later hit only this close (a share of the floor):
+# "주문 상태" reaches "Order Status" at 0.31 with MiniLM, unrelated queries stay at or under 0.14.
+LEARN_FLOOR_RATIO = 0.5
+
+LARGER_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+# Each model spreads cosine similarity differently, so the floor that drops noise is per model.
+# Measured on benchmarks/tasks.json semantic_search: unrelated queries stay at or under 0.14 with
+# both models; the weakest true synonym ("turnover" -> "Revenue") is 0.52 with MiniLM and 0.46
+# with mpnet. intfloat/multilingual-e5-small ranks well but squeezes every pair into 0.74-0.86,
+# leaving no floor that separates noise, so it has no profile.
+MODEL_MIN_SIMILARITY: dict[str, float] = {
+    DEFAULT_EMBEDDING_MODEL: 0.50,
+    LARGER_EMBEDDING_MODEL: 0.40,
+}
+# Short names accepted by AUTO_ONTOLOGY_EMBEDDING_MODEL.
+MODEL_ALIASES: dict[str, str] = {
+    "minilm": DEFAULT_EMBEDDING_MODEL,
+    "default": DEFAULT_EMBEDDING_MODEL,
+    "mpnet": LARGER_EMBEDDING_MODEL,
+    "large": LARGER_EMBEDDING_MODEL,
+}
+
+
+def resolve_model_name(name: str | None) -> str:
+    """Expand a short alias (``mpnet``) to the fastembed model id; other names pass through."""
+    cleaned = (name or "").strip()
+    return MODEL_ALIASES.get(cleaned.casefold(), cleaned) if cleaned else DEFAULT_EMBEDDING_MODEL
+
+
+def model_min_similarity(model_name: str, override: float | None = None) -> float:
+    """The cosine floor below which a vector hit is noise for ``model_name``."""
+    if override is not None:
+        return float(override)
+    return MODEL_MIN_SIMILARITY.get(model_name, DEFAULT_MIN_SIMILARITY)
 
 _MODEL_LOCK = threading.Lock()
 _MODEL_CACHE: dict[tuple[str, str | None], Any] = {}
@@ -146,6 +182,27 @@ def blend_ontology_score(
     return round(min(1.0, base + (1.0 - base) * bonus), 4)
 
 
+def model_disk_bytes(model_name: str, cache_dir: Path | None = None) -> int | None:
+    """Bytes the downloaded fastembed model files take, or None when it is not in the cache."""
+    try:
+        fastembed = importlib.import_module("fastembed")
+        source = next(
+            (m.get("sources", {}).get("hf") for m in fastembed.TextEmbedding.list_supported_models() if m["model"] == model_name),
+            None,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    if not source:
+        return None
+    import tempfile
+
+    root = Path(cache_dir) if cache_dir else Path(tempfile.gettempdir()) / "fastembed_cache"
+    snapshots = root / f"models--{source.replace('/', '--')}" / "snapshots"
+    if not snapshots.is_dir():
+        return None
+    return sum(f.stat().st_size for f in snapshots.rglob("*") if f.is_file())
+
+
 class Embedder(Protocol):
     @property
     def model_name(self) -> str: ...
@@ -221,11 +278,13 @@ class VectorIndex:
         cache_dir: Path | None = None,
         embedder: Embedder | None = None,
         use_sqlite_vec: bool | None = None,
+        min_similarity: float | None = None,
     ) -> None:
         self.path = Path(path)
         self._enabled = enabled
         self._embedder = embedder
-        self._model_name = embedder.model_name if embedder is not None else model_name
+        self._model_name = embedder.model_name if embedder is not None else resolve_model_name(model_name)
+        self._min_similarity_override = min_similarity
         self._cache_dir = cache_dir
         self._use_sqlite_vec = use_sqlite_vec
         self._lock = threading.RLock()
@@ -235,6 +294,11 @@ class VectorIndex:
     @property
     def model_name(self) -> str:
         return self._model_name
+
+    @property
+    def min_similarity(self) -> float:
+        """Cosine floor for this index's model (``AUTO_ONTOLOGY_MIN_SIMILARITY`` overrides it)."""
+        return model_min_similarity(self._model_name, self._min_similarity_override)
 
     def _should_use_sqlite_vec(self) -> bool:
         if self._use_sqlite_vec is not None:
@@ -280,7 +344,7 @@ class VectorIndex:
             return {"enabled": False, "reason": "disabled by AUTO_ONTOLOGY_SEMANTIC"}
         if self.is_available():
             backend = "sqlite-vec" if self._should_use_sqlite_vec() and self._can_load_sqlite_vec() else "sqlite-blob"
-            return {"enabled": True, "model": self._model_name, "backend": backend}
+            return {"enabled": True, "model": self._model_name, "backend": backend, "min_similarity": self.min_similarity}
         missing = []
         if self._embedder is None and not fastembed_available():
             missing.append("fastembed")
@@ -470,6 +534,20 @@ class VectorIndex:
                 logger.warning("Vector index sync failed for %s/%s; continuing with lexical search: %s", scope, kind, exc)
                 return {"embedded": 0, "deleted": 0, "unchanged": 0}
 
+    def similarities(self, query: str, texts: Sequence[str]) -> list[float] | None:
+        """Cosine similarity of ``query`` to each of ``texts``; None when embeddings are off or fail."""
+        if not self.is_available() or not (query or "").strip() or not texts:
+            return None
+        with self._lock:
+            try:
+                qvec = self._get_embedder().embed_query(query.strip())
+                vecs = self._get_embedder().embed_documents(list(texts))
+            except Exception as exc:  # noqa: BLE001
+                self._last_error = str(exc)
+                logger.warning("Embedding for similarity failed: %s", exc)
+                return None
+        return [round(cosine_similarity(qvec, v), 4) for v in vecs]
+
     def search(
         self,
         scope: str,
@@ -477,11 +555,16 @@ class VectorIndex:
         query: str,
         *,
         limit: int = 20,
-        min_similarity: float = DEFAULT_MIN_SIMILARITY,
+        min_similarity: float | None = None,
     ) -> list[VectorHit]:
-        """Return nearest indexed items for ``query`` across ``kinds`` in ``scope``."""
+        """Return nearest indexed items for ``query`` across ``kinds`` in ``scope``.
+
+        ``min_similarity`` defaults to the model's own floor (:attr:`min_similarity`).
+        """
         if not self.is_available() or not (query or "").strip() or not kinds:
             return []
+        if min_similarity is None:
+            min_similarity = self.min_similarity
         if not self.path.exists():
             return []
         limit = max(1, int(limit))

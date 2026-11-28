@@ -1,6 +1,6 @@
 ---
 name: polish
-description: Rewrite text an agent wrote for people (channel messages, mission reasons, completion reports, issue titles and bodies, docs, UI copy) so it reads like a person wrote it, without changing its meaning. Use before posting any Korean message or report (run the pre-report check in this skill before mission_finish, issue review comments, issue titles and bodies, channel posts and doc_write), and when reviewing agent text for translationese, crammed lists, English reports in Korean channels, long chained sentences, noun stacks, self-ratings, or reports that only say the work finished. Keep the numbered patterns between five and seven.
+description: Rewrite text an agent wrote for people (channel messages, mission reasons, completion reports, issue titles and bodies, docs, UI copy) so it reads like a person wrote it, without changing its meaning. Use before posting any Korean message or report (run the pre-report check in this skill before mission_finish, issue review comments, issue titles and bodies, channel posts, doc_write and doc_comment), and when reviewing agent text for translationese, crammed lists, English reports in Korean channels, long chained sentences, noun stacks, self-ratings, or reports that only say the work finished. Keep the numbered patterns between five and seven.
 ---
 
 # polish
@@ -25,7 +25,8 @@ description: Rewrite text an agent wrote for people (channel messages, mission r
 | ~에 정확히 부합합니다, ~에 정확히 맞습니다 | ~입니다, ~라서 맡습니다 |
 | ~을(를) 대상으로 ~을 수행합니다 | ~으로 ~합니다 |
 | ~하도록 구현했습니다 | ~합니다, ~하게 했습니다 |
-| ~ 통과를 확인했습니다 | ~를 통과합니다 |
+| ~ 통과를 확인했습니다, ~ 통과를 검증합니다 | ~를 통과합니다 |
+| 기준선 대비 ~, ~하는 한계가 있습니다 | 기준선보다 ~, ~하지 못합니다 |
 | 이를 통해, 해당 ~ | 그래서, 이 ~ (또는 지운다) |
 | ~가 아니라 ~입니다 (강조용) | 뒷말만 쓴다 |
 
@@ -91,7 +92,7 @@ description: Rewrite text an agent wrote for people (channel messages, mission r
 
 ## 패턴 5. 한자어 명사로 뭉친 조건과 시점 (noun stack)
 
-'향후', '~ 시', '미설치', '미할당', '비활성화', '기존'처럼 한자어 명사로 조건과 시점을 접으면 문서 투가 되고, 무엇이 어떤 상태일 때인지 다시 풀어 읽어야 한다. 동사로 풀어 '앞으로', '~할 때', '설치하지 않으면', '맡은 사람이 없다', '지금'으로 쓴다. `기존으로`처럼 조사가 바로 붙어도 같다. `검토 시`, `배포 시`처럼 명사 뒤의 `시`는 동사로 푼다. `3시`, `시간`, `다시`, `표시`는 시각이나 다른 말이라 그대로 둔다.
+'향후', '~ 시', '미설치', '미할당', '미충족', '비활성화', '기존'처럼 한자어 명사로 조건과 시점을 접으면 문서 투가 되고, 무엇이 어떤 상태일 때인지 다시 풀어 읽어야 한다. 동사로 풀어 '앞으로', '~할 때', '설치하지 않으면', '맡은 사람이 없다', '지금'으로 쓴다. `기존으로`처럼 조사가 바로 붙어도 같다. `검토 시`, `배포 시`처럼 명사 뒤의 `시`는 동사로 푼다. `3시`, `시간`, `다시`, `표시`는 시각이나 다른 말이라 그대로 둔다.
 
 고치기 전:
 > 미설치 또는 비활성화 환경에서는 기존 어휘 검색과 FTS5 검색이 그대로 동작합니다.
@@ -180,7 +181,7 @@ description: Rewrite text an agent wrote for people (channel messages, mission r
 ## 함께 지킬 것
 
 - 가운뎃점(·)으로 명사를 묶지 않는다. '구현·검증·병합'은 '구현하고 검증해 병합'으로 쓴다.
-- '구축', '수행', '연동', '등록되었고' 같은 명사형 동사보다 '만들다', '하다', '잇다', '올라왔다'를 쓴다.
+- '구축', '수행', '연동', '등록되었고' 같은 명사형 동사보다 '만들다', '하다', '잇다', '올라왔다'를 쓴다. '반영했습니다', '확보했습니다'는 무엇이 어떻게 바뀌었는지 쓴다.
 - 고칠 때 없던 판단이나 수치를 더하지 않는다. 원문에 없는 내용이 필요하면 고치지 말고 원문 작성자에게 묻는다.
 
 ## 완료 보고 전 점검
@@ -192,7 +193,7 @@ description: Rewrite text an agent wrote for people (channel messages, mission r
 3. 상태 0(`ok: no polish patterns found`)이 나올 때까지 1과 2를 되풀이한다.
 4. 고치기 전과 뒤의 수치, 파일 이름, 티켓 번호, 명령이 같은지 대조한 뒤 올린다.
 
-다섯 도구는 훅이 대신 점검한다. `.claude/settings.json`에 건 `scripts/polish_hook.py`가 mission_finish의 summary와 next, issue_update의 comment와 title과 body, message_post의 text, issue_create의 title과 body, doc_write의 text에서 패턴을 찾으면 호출을 막고, 찾은 줄과 그 패턴의 고친 예를 보여 준다. 예처럼 문장만 고쳐 다시 부른다.
+여섯 도구는 훅이 대신 점검한다. `.claude/settings.json`에 건 `scripts/polish_hook.py`가 mission_finish의 summary와 next, issue_update의 comment와 title과 body, message_post의 text, issue_create의 title과 body, doc_write의 text, doc_comment의 text에서 패턴을 찾으면 호출을 막고, 찾은 줄과 그 패턴의 고친 예를 보여 준다. 예처럼 문장만 고쳐 다시 부른다.
 
 스크립트는 패턴을 찾을 뿐 고치지 않는다. 일부러 남긴 표현이라 판단하면 그대로 올려도 되지만, 그 줄이 왜 괜찮은지 스스로 설명할 수 있어야 한다.
 

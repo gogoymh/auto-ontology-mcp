@@ -42,3 +42,20 @@ def test_cli_semantic_flag_measures_recall_gain_and_latency(tmp_path: Path):
     assert hyb["recall_by_group"]["cross_lingual"] >= 0.5 > lex["recall_by_group"]["cross_lingual"]
     assert hyb["negative_precision"] == 1.0 and not sem["delta"]["lost"]
     assert hyb["latency_ms"]["p50"] > 0 and lex["latency_ms"]["p50"] > 0 and sem["delta"]["p50_ratio"] > 0
+
+
+def test_default_model_saves_missed_korean_compound_from_the_translated_search(modeled):
+    # MiniLM puts "주문 상태" at 0.31 from "Order Status": the hybrid search misses it, the
+    # translated search offers the update_term call, and after it the phrase finds the column.
+    assert modeled.vectors.min_similarity == 0.50
+    miss = modeled.search_ontology("주문 상태")
+    assert miss["search_mode"] == "hybrid"
+    assert "Order › Order Status" not in [h["name"] for h in miss["hits"][:3]]
+    learn = modeled.search_ontology("order status")["learn"]
+    assert learn["phrase"] == "주문 상태"
+    call = next(c["update_term"] for c in learn["candidates"] if c["name"] == "Order › Order Status")
+    modeled.update_term(**call)
+    assert modeled.search_ontology("주문 상태")["hits"][0]["name"] == "Order › Order Status"
+    # An unrelated miss is not offered as a synonym of the next hit.
+    modeled.search_ontology("astrophysics telescope")
+    assert "learn" not in modeled.search_ontology("order date")

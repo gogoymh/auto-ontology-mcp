@@ -12,13 +12,16 @@ from pathlib import Path
 # pattern id -> (regexes for phrases, hint)
 TRANSLATIONESE = [
     r"부합합니다", r"정확히 맞", r"을\s?대상으로|를\s?대상으로", r"수행(합|했|하)", r"하도록 구현했",
-    r"통과(를|함을) 확인했", r"이를 통해", r"해당 ", r"가 아니라 .*입니다",
+    r"통과(를|함을) (확인|검증)", r"이를 통해", r"해당 ", r"가 아니라 .*입니다",
+    # 기준선 대비, 한계가 있습니다: phrases lifted from English (compared to, has a limitation)
+    r"(?<![가-힣])대비(?![가-힣])", r"한계가 있",
 ]
-NOMINAL = [r"구축", r"연동", r"등록되었"]
+# 반영했다 and 확보했다 say something changed without saying what; 반영돼 있다 (already in) stays allowed
+NOMINAL = [r"구축", r"연동", r"등록되었", r"반영(했|합니|한다)", r"확보(했|합니|한다)"]
 # 시 after a noun of two or more syllables (검토 시, 배포 시). Not 3시, 시간, 다시, 표시.
 NOUNSTACK = [
     r"향후",
-    r"(?<![가-힣])미(할당|설치|적용|반영|처리|확인)",
+    r"(?<![가-힣])미(할당|설치|적용|반영|처리|확인|충족|실행|커버)",
     r"비활성화",
     r"[가-힣]{2,} 시(?![가-힣])",
     r"(?<![가-힣])기존",
@@ -39,6 +42,10 @@ _FILLER = re.compile(
 _RESULT = re.compile(r"\d+\.\d+|\d+점|올리|올라|올랐|올렸|내리|내려|줄었|줄어|늘었|늘어|고쳤|고쳐|통과")
 # three or more paths plus a number and one of these verbs, even with no parentheses
 _CRAM_ACT = re.compile(r"추가|구현|저장|수행|넣었|고쳤|더했|만들었|바꿨|옮겼|지웠|붙였")
+# an English clause inside a Korean sentence: six or more English words in a row
+_EN_RUN = re.compile(r"(?<![\w/.-])[A-Za-z][A-Za-z']*(?:[ ,:;]+[A-Za-z][A-Za-z']*){5,}")
+# a trailing note in parentheses, '(작업: AOM-25 채점)', adds no result to a completion line
+_TAIL_PAREN = re.compile(r"\s*\([^()]*\)(?=[.!]*$)")
 CONNECTORS = r"(상태에서|되었고|되었으며|했으며|반면|하므로|이므로)"  # 되어/하고/이고 stay allowed
 # \b misses a path glued to a Korean particle (tasks.json과). Stop at an ASCII word char instead.
 FILE = r"[\w./-]+\.(py|json|toml|md|ts|tsx|js|jsx|rs|yml|yaml|sql|sh|txt)(?![A-Za-z0-9_])"
@@ -69,8 +76,12 @@ def log(msg: str) -> None:
 # Past tense -었다/-났다/-겠다 ends on a syllable whose final consonant is ㅆ.
 _N_FINAL = "".join(chr(0xAC00 + i * 28 + 4) for i in range(19 * 21))
 _SS_FINAL = "".join(chr(0xAC00 + i * 28 + 20) for i in range(19 * 21))
+# Those endings also sit inside a sentence: '실패한다 해도', '배포했다 하더라도', '있다 없다'.
+# A -다 followed by a concessive or conditional verb, or by 있다/없다, does not end the sentence.
+_INNER_DA = r"(?!(?:해도|하더라도|치더라도|치고|하고|하는|하면|하니|해서)(?![가-힣])|[있없]다)"
 _END = re.compile(
-    rf"(?:(?<=[.!?])|(?<=니다)|(?<=[{_SS_FINAL}]다)|(?<=[{_N_FINAL}]다)|(?<=[어아여해세에죠돼네]요)|(?<=죠))\s+|\n+"
+    rf"(?:(?<=[.!?])|(?<=니다)|(?<=[어아여해세에죠돼네]요)|(?<=죠))\s+"
+    rf"|(?<=[{_SS_FINAL}{_N_FINAL}]다)\s+{_INNER_DA}|\n+"
 )
 _ABBREV = re.compile(r"\b(?:e\.g|i\.e|vs|etc|cf)\.$", re.I)  # e.g. does not end a sentence
 _QUANTITY = re.compile(r"\d")
@@ -92,7 +103,15 @@ def sentences(text: str) -> list[str]:
         out.append(buf)
         buf = ""
     out.append(buf + text[pos:])
-    return [p.strip() for p in out if p.strip()]
+    parts: list[str] = []
+    for p in (p.strip() for p in out):
+        if not p:
+            continue
+        if parts and p.startswith("("):  # '마쳤습니다 (작업: …).' keeps its note in the same sentence
+            parts[-1] += " " + p
+        else:
+            parts.append(p)
+    return parts
 
 
 # Text the writer quotes is not their own wording, so the lint skips it:
@@ -120,9 +139,16 @@ def has_quantity(s: str) -> bool:
     return bool(_QUANTITY.search(rest))
 
 
+def quantities(s: str) -> int:
+    """Count the numbers in s outside file names (with their :line), ticket ids and versions."""
+    rest = _ID.sub("", re.sub(FILE + r"(?::\d+(?:-\d+)?)?", "", s))
+    return len(re.findall(r"\d+(?:\.\d+)?", rest))
+
+
 def empty_report(text: str) -> bool:
     """True when every sentence only says that something finished."""
     parts = [p for p in sentences(text) if not _FILLER.search(p)]
+    parts = [_TAIL_PAREN.sub("", p) for p in parts]
     return bool(parts) and all(
         _DONE.search(part) and not _RESULT.search(part) and not has_quantity(part) for part in parts
     )
@@ -151,10 +177,12 @@ def lint(text: str) -> list[tuple[str, str]]:
         # 을(를), 이(가), (으)로 hint a particle; a lone syllable in parentheses explains nothing
         parens = [p for p in re.findall(r"\(([^)]*)\)", s) if not re.fullmatch(r"[가-힣]", p)]
         paren_hit = len(parens) >= 3 or (len(parens) >= 2 and any(re.search(FILE, p) for p in parens))
-        file_hit = len(re.findall(FILE, s)) >= 3 and has_quantity(s) and _CRAM_ACT.search(s)
+        files = len(re.findall(FILE, s))
+        file_hit = (files >= 3 and has_quantity(s) and _CRAM_ACT.search(s)) or (files >= 2 and quantities(s) >= 3)
         if paren_hit or file_hit:
             found.append(("crammed", s[:60]))
-        if not re.search(r"[가-힣]", s) and len(re.findall(r"\b[A-Za-z]{2,}\b", plain)) >= 3:
+        korean = re.search(r"[가-힣]", s)
+        if (not korean and len(re.findall(r"\b[A-Za-z]{2,}\b", plain)) >= 3) or (korean and _EN_RUN.search(plain)):
             found.append(("english", s[:60]))
         joins = re.findall(CONNECTORS + r"[,\s]", plain)
         if len(joins) >= 2 or (re.search(r"상태에서|반면", plain) and len(plain) > 50):

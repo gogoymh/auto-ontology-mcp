@@ -144,7 +144,7 @@ def build_docs(
         docs.append(
             Doc(
                 "attribute", a["id"], f"{a['term_name']} › {a['display_name']}",
-                [(a["display_name"], 0.9), (a["column_name"], 0.75), (f"{a['term_name']} {a['display_name']}", 0.85),
+                [(a["display_name"], 0.9), (" ".join(a.get("synonyms") or []), 0.9), (a["column_name"], 0.75), (f"{a['term_name']} {a['display_name']}", 0.85),
                  (a.get("description") or "", 0.4), (sample_text, 0.35)],
                 {"term": a["term_name"], "column": f"{a['table_name']}.{a['column_name']}", "data_type": a.get("data_type")},
             )
@@ -194,10 +194,10 @@ def doc_text(doc: Doc, max_chars: int = 2000) -> str:
     return joined[:max_chars] if len(joined) > max_chars else joined
 
 
-# How many leading fields of a Doc hold its name: a Term's name and its synonyms, else the
-# name alone. Kinds left out (examples, sources) are long texts with no short name worth
+# How many leading fields of a Doc hold its name: a Term's or column's name and its synonyms,
+# else the name alone. Kinds left out (examples, sources) are long texts with no short name worth
 # a vector of its own.
-NAME_FIELDS = {"term": 2, "attribute": 1, "sql_attribute": 1, "glossary": 1, "table": 1}
+NAME_FIELDS = {"term": 2, "attribute": 2, "sql_attribute": 1, "glossary": 1, "table": 1}
 NAME_SUFFIX = "#name"
 
 

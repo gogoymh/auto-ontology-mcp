@@ -2,7 +2,7 @@
 """Claude Code PreToolUse hook: run the polish lint on agent reports before they are posted.
 
 Checks mission_finish (summary, next), issue_update (comment, title, body), message_post (text),
-issue_create (title, body) and doc_write (text). Title fields get the title checks as well.
+issue_create (title, body), doc_write (text) and doc_comment (text). Title fields get the title checks as well.
 Reads the hook payload (JSON with tool_name and tool_input) on stdin. When one of those
 fields has a pattern from .claude/skills/polish/SKILL.md, it exits 2 so the call is
 blocked and prints, on stderr, each finding with the skill's before/after example, asking the
@@ -18,13 +18,14 @@ SKILL = ROOT / ".claude/skills/polish/SKILL.md"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lint_report import HINTS, lint, lint_title  # noqa: E402
 
-# tool name suffix (mcp__cua__<name>) -> (fields to lint, what the text is, in the block message)
+# tool name suffix (mcp__cua__<name> or mcp__preconquer__<name>) -> (fields to lint, what the text is, in the block message)
 TOOLS = {
     "mission_finish": (("summary", "next"), "완료 보고"),  # body and commit are English by rule
     "issue_update": (("comment", "title", "body"), "이슈 댓글과 본문"),
     "message_post": (("text",), "채널 메시지"),
     "issue_create": (("title", "body"), "이슈 제목과 본문"),
     "doc_write": (("text",), "문서"),
+    "doc_comment": (("text",), "문서 댓글"),  # quote is the document's own words, not the agent's
 }
 # finding id -> section tag in the skill whose first example the hook shows
 SECTIONS = {

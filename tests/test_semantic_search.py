@@ -511,11 +511,14 @@ def test_hybrid_search_reuses_cached_revision_docs(settings, tmp_path, monkeypat
 
 def test_name_text_is_bare_name_and_term_synonyms():
     term = Doc("term", "t1", "Revenue", [("Revenue", 1.0), ("Turnover Sales", 0.95), ("order_lines", 0.6)])
-    attr = Doc("attribute", "a1", "Order Line › Revenue", [("Revenue", 0.9), ("line_total", 0.75), ("237.0 79.0", 0.35)])
+    attr = Doc("attribute", "a1", "Order Line › Revenue", [("Revenue", 0.9), ("", 0.9), ("line_total", 0.75), ("237.0 79.0", 0.35)])
+    status = Doc("attribute", "a2", "Order › Order Status", [("Order Status", 0.9), ("주문 상태", 0.9), ("status", 0.75)])
     example = Doc("example", "e1", "Revenue by month", [("Revenue by month", 0.9), ("monthly", 0.4)])
     bare = Doc("glossary", "g1", "GMV", [("GMV", 1.0)])
     assert name_text(term) == "Revenue\nTurnover Sales"
     assert name_text(attr) == "Revenue"
+    # A column's saved synonyms join its name vector, the column name does not.
+    assert name_text(status) == "Order Status\n주문 상태"
     # Long-text kinds get no name vector; a name that is the whole document needs no second one.
     assert name_text(example) == ""
     assert name_text(bare) == ""
@@ -543,8 +546,8 @@ def test_hybrid_search_finds_metric_by_its_name_vector(settings, tmp_path):
     svc.vectors = VectorIndex(tmp_path / "n.vectors.sqlite", enabled=True, embedder=NameEmbedder(), use_sqlite_vec=False)
     ds = {"id": "ds-name", "name": "shop"}
     docs = [
-        Doc("attribute", "a1", "Order Line › Revenue", [("Revenue", 0.9), ("line_total", 0.75), ("237.0 79.0", 0.35)]),
-        Doc("attribute", "a2", "Order › Status", [("Status", 0.9), ("status", 0.75), ("Delivered Shipped", 0.35)]),
+        Doc("attribute", "a1", "Order Line › Revenue", [("Revenue", 0.9), ("", 0.9), ("line_total", 0.75), ("237.0 79.0", 0.35)]),
+        Doc("attribute", "a2", "Order › Status", [("Status", 0.9), ("", 0.9), ("status", 0.75), ("Delivered Shipped", 0.35)]),
     ]
     hits = svc._search(ds, "turnover", docs=docs)
     assert [h["id"] for h in hits] == ["a1"]

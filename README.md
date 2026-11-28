@@ -531,6 +531,14 @@ Limits to know about:
 
 - Generated pages are a one-way view. Edits made to them in Obsidian are not read back; change knowledge through the assistant and run `export_wiki` again (it replaces only the pages it generated and never touches originals or pages you wrote).
 - Search is lexical by default (FTS5 matches words and prefixes, not meaning). Install the optional `semantic` extra (`fastembed` + `sqlite-vec`) to enable local hybrid vector search for synonyms, paraphrases and multilingual queries without external API keys. On the built-in benchmark it lifts recall@3 on synonym, paraphrase and Korean-English queries from 0.40 to 0.96 and raises query latency from p50 4.1 ms to 19.1 ms, about 15 ms more (`uv run python benchmarks/run_benchmark.py --semantic --iterations 10`, median of three runs on 2026-11-28; the 18-core Mac was never idle and its load average stayed between 60 and 95, so an idle machine should come in lower). Otherwise, search with the words the sources use, add your own words as synonyms, and translate when the sources are in another language.
+- The default model misses some short Korean compounds ("주문 상태" sits at 0.31 from "Order Status", below unrelated names). Save the phrase once as a synonym (search replies offer the call), or opt into the larger model with `AUTO_ONTOLOGY_EMBEDDING_MODEL=mpnet`:
+
+  | Model | Recall@3 | Negatives | Disk | Load | p50 |
+  |---|---:|---:|---:|---:|---:|
+  | MiniLM-L12 (default) | 0.96 | 1.00 | 252 MB | 0.6 s | 15.5 ms |
+  | mpnet-base | 1.00 | 1.00 | 1127 MB | 0.9 s | 22.8 ms |
+
+  `uv run --extra semantic python scripts/check_semantic_recall.py --model mpnet`, one run each on 2026-11-28 with the models already downloaded; the first download of mpnet takes about 100 s.
 - The store indexes passages, not whole originals. What the model did not save as a passage or summary is in the vault but not in `search_text`.
 - Nothing watches your files or the vault. When a document changes, ask the assistant to read it again. Earlier versions of its original stay in the vault until you delete them.
 - It is a single-user store on your machine. Back it up by copying `~/.auto-ontology-mcp`.
@@ -609,7 +617,7 @@ Each step of Auto Ontology maps to one side of that line:
 | Ingesting knowledge | Ingestion service reads databases | The model reads files, images and notes; the server validates and stores the records, concepts and sources it extracts |
 | Schema changes | Scheduled re-ingest diffs the catalog; semantic compilation models only tables that have no Term yet | `scan_datasource` diffs the catalog; the worklist returns new tables and modeled tables that gained columns |
 
-Search is lexical by default: token overlap, trigram similarity and phrase match for Terms and columns, and SQLite FTS5 with bm25 for the text of passages, bodies and sources. With the optional `semantic` extra installed, `search_ontology` and `search_text` become hybrid (`search_mode: "hybrid"`): a local `fastembed` model adds vector matches, fused with the lexical ranking, so synonyms, paraphrases and other languages match without translation and without an external API. The server instructions follow the mode. Lexical: search with the schema's vocabulary, translate non-English phrases and try synonyms. Hybrid: search once in the user's own words. Either way the user's words can be added as synonyms with `update_term(add_synonyms=[...])`, after which they match directly.
+Search is lexical by default: token overlap, trigram similarity and phrase match for Terms and columns, and SQLite FTS5 with bm25 for the text of passages, bodies and sources. With the optional `semantic` extra installed, `search_ontology` and `search_text` become hybrid (`search_mode: "hybrid"`): a local `fastembed` model adds vector matches, fused with the lexical ranking, so synonyms, paraphrases and other languages match without translation and without an external API. The server instructions follow the mode. Lexical: search with the schema's vocabulary, translate non-English phrases and try synonyms. Hybrid: search once in the user's own words. Either way the user's words can be added as synonyms with `update_term(add_synonyms=[...])` for a Term or `column_updates=[{column, add_synonyms}]` for a column, after which they match directly. A search that matches nothing by its own words is remembered: when the next search (the model's translation) hits a Term or column, the reply carries `learn.candidates` with the exact `update_term` call that saves the phrase there.
 
 Not carried over from Auto Ontology: the web UI and REST API, users, groups and RBAC, zones (access scoping), tags and rules, PII detection, JSONB path checks, pgvector embedding search (here only the optional local hybrid search above) and reranking, chart generation, KumoRFM predictions and Apache Ossie interchange (export and import use this project's own YAML format). Added here and not in Auto Ontology: write access over MCP, the personal knowledge store (Auto Ontology ingests databases, not documents), concept pages with typed relations, provenance on records, passages with full-text search, originals kept in Obsidian, the Obsidian export, and returning columns added to modeled tables to the model after a re-scan.
 
@@ -651,7 +659,8 @@ Over HTTP, a token is required to reach the server from anywhere but localhost: 
 | `AUTO_ONTOLOGY_ALLOW_DATASOURCE_TOOLS` | `1` | `0` hides `add_datasource` and `scan_datasource` from MCP |
 | `AUTO_ONTOLOGY_TOOLSETS` | `all` | Tool groups to expose, comma-separated: `answer` (always on), `model`, `knowledge`, `share` |
 | `AUTO_ONTOLOGY_SEMANTIC` | `auto` | Optional local hybrid search (`fastembed` + `sqlite-vec`): `auto` enables when installed, `0` disables |
-| `AUTO_ONTOLOGY_EMBEDDING_MODEL` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | Local `fastembed` ONNX model used when the `semantic` extra is installed |
+| `AUTO_ONTOLOGY_EMBEDDING_MODEL` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | Local `fastembed` ONNX model used when the `semantic` extra is installed. `mpnet` picks the larger `paraphrase-multilingual-mpnet-base-v2` (see below) |
+| `AUTO_ONTOLOGY_MIN_SIMILARITY` | per model | Cosine floor for vector hits: 0.50 for MiniLM, 0.40 for mpnet, 0.50 for any other model |
 | `AUTO_ONTOLOGY_EMBEDDING_CACHE` | unset | Optional cache directory for local `fastembed` model files |
 | `AUTO_ONTOLOGY_MCP_TOKEN` | unset | Token required by the HTTP transport (same as `--token`) |
 | `AUTO_ONTOLOGY_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | HTTP bind address |
