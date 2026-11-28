@@ -530,7 +530,7 @@ What the structure adds on top of markdown pages:
 Limits to know about:
 
 - Generated pages are a one-way view. Edits made to them in Obsidian are not read back; change knowledge through the assistant and run `export_wiki` again (it replaces only the pages it generated and never touches originals or pages you wrote).
-- Search is lexical by default (FTS5 matches words and prefixes, not meaning). Install the optional `semantic` extra (`fastembed` + `sqlite-vec`) to enable local hybrid vector search for synonyms, paraphrases and multilingual queries without external API keys. On the built-in benchmark it lifts recall@3 on synonym, paraphrase and Korean-English queries from 0.40 to 0.96 and raises query latency from p50 4.1 ms to 19.1 ms, about 15 ms more (`uv run python benchmarks/run_benchmark.py --semantic --iterations 10`, median of three runs on 2026-11-28; the 18-core Mac was never idle and its load average stayed between 60 and 95, so an idle machine should come in lower). Otherwise, search with the words the sources use, add your own words as synonyms, and translate when the sources are in another language.
+- Search is lexical by default (FTS5 matches words and prefixes, not meaning). Install the optional `semantic` extra (`fastembed` + `sqlite-vec`) to enable local hybrid vector search for synonyms, paraphrases and multilingual queries without external API keys. On the built-in benchmark it lifts recall@3 on synonym, paraphrase and Korean-English queries from 0.40 to 0.96 and raises query latency from p50 2.4 ms to 13.7 ms, about 11 ms more (`uv run python benchmarks/run_benchmark.py --semantic --iterations 10`, median of three 4-vCPU GitHub Actions runners on 2026-11-28, kept in `benchmarks/baseline.json`). Otherwise, search with the words the sources use, add your own words as synonyms, and translate when the sources are in another language.
 - The default model misses some short Korean compounds ("주문 상태" sits at 0.31 from "Order Status", below unrelated names). Save the phrase once as a synonym (search replies offer the call), or opt into the larger model with `AUTO_ONTOLOGY_EMBEDDING_MODEL=mpnet`:
 
   | Model | Recall@3 | Negatives | Disk | Load | p50 |
@@ -538,7 +538,7 @@ Limits to know about:
   | MiniLM-L12 (default) | 0.96 | 1.00 | 252 MB | 0.6 s | 15.5 ms |
   | mpnet-base | 1.00 | 1.00 | 1127 MB | 0.9 s | 22.8 ms |
 
-  `uv run --extra semantic python scripts/check_semantic_recall.py --model mpnet`, one run each on 2026-11-28 with the models already downloaded; the first download of mpnet takes about 100 s.
+  `uv run --extra semantic python scripts/check_semantic_recall.py --model mpnet`, one run each on a busy Mac on 2026-11-28 with the models already downloaded, so compare the p50 columns with each other rather than with the runner figure above; the first download of mpnet takes about 100 s.
 - The store indexes passages, not whole originals. What the model did not save as a passage or summary is in the vault but not in `search_text`.
 - Nothing watches your files or the vault. When a document changes, ask the assistant to read it again. Earlier versions of its original stay in the vault until you delete them.
 - It is a single-user store on your machine. Back it up by copying `~/.auto-ontology-mcp`.
