@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "mcp__cua__(mission_finish|issue_update|message_post)",
+        "matcher": "mcp__cua__(mission_finish|issue_update|message_post|issue_create|doc_write)",
         "hooks": [
           {
             "type": "command",

@@ -47,7 +47,12 @@ HINTS = {
     "nounstack": "한자어 명사: '앞으로', '설치하지 않으면', '맡은 사람이 없다'처럼 풀어 쓴다 (패턴 5)",
     "selfrate": "스스로 매긴 평가: '명확한', '완결할 수 있는'을 지우고 근거 사실을 쓴다 (패턴 6)",
     "empty": "빈 보고: 무엇이 달라졌는지 한 문장을 붙인다 (패턴 7)",
+    "title": "제목: 파일 경로, 명령, '작업:' 머리말을 빼고 사용자가 얻는 결과를 짧게 쓴다 (제목)",
 }
+TITLE_MAX = 50  # a longer title is cut in the channel (…), so it must say the result within this many chars
+_TITLE_PREFIX = re.compile(r"^\s*(?:작업|할 일|TODO|Task)\s*[:：]", re.I)
+_TITLE_FLAG = re.compile(r"(?<![\w-])--?[A-Za-z][\w-]*")
+_TITLE_CUT = re.compile(r"(?:…|\.\.\.)\s*$")
 
 
 def log(msg: str) -> None:
@@ -140,6 +145,20 @@ def lint(text: str) -> list[tuple[str, str]]:
         joins = re.findall(CONNECTORS + r"[,\s]", plain)
         if len(joins) >= 2 or (re.search(r"상태에서|반면", plain) and len(plain) > 50):
             found.append(("chained", s[:60]))
+    return found
+
+
+def lint_title(title: str) -> list[tuple[str, str]]:
+    """Return lint(title) plus the title findings: a file path, a command flag, a '작업:' prefix,
+    a cut-off ending (…) or more than TITLE_MAX characters. Quoted spans are not checked."""
+    found = lint(title)
+    plain = mask(title).strip()
+    for rx in (_TITLE_PREFIX, re.compile(FILE), _TITLE_FLAG, _TITLE_CUT):
+        m = rx.search(plain)
+        if m:
+            found.append(("title", m.group(0).strip()))
+    if len(plain) > TITLE_MAX:
+        found.append(("title", f"{len(plain)}자: {plain[:30]}"))
     return found
 
 
