@@ -34,6 +34,18 @@ AO_TEST_PG_URL=postgresql+psycopg://postgres:pw@127.0.0.1:55432/postgres uv run 
 
 Pull requests are squash-merged, so the pull request title becomes the commit message on `main`. Write it as a sentence about the change (`Warn when a filter compares a percent column with a fraction`).
 
+## Following upstream
+
+This project derives from [NVIDIA Auto Ontology](https://github.com/NVIDIA/auto-ontology) (see [NOTICE](NOTICE)). `scripts/upstream_scout.py` lists the upstream pull requests merged since the last review, grouped by whether they touch code adapted here (`ported`), an area with a counterpart here (`related`) or upstream-only parts such as the web app (`other`):
+
+```bash
+python3 scripts/upstream_scout.py                    # digest since scripts/upstream_state.json
+python3 scripts/upstream_scout.py --up-to-date       # exit 0 when there is nothing new
+python3 scripts/upstream_scout.py --mark-reviewed SHA  # after filing tickets for the digest up to SHA
+```
+
+Upstream history is kept as a blobless clone in `~/.cache/auto-ontology-mcp/` (a few MB). Port ideas, not code that is not Apache-2.0, and add adapted files to NOTICE and to `PORTED` in the script.
+
 ## Safety rules for changes
 
 The server connects to other people's databases. A change must not:
