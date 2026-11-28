@@ -56,6 +56,9 @@ class ColumnUpdate(BaseModel):
     column: str = Field(description="Physical column name mapped by this Term.")
     display_name: str | None = Field(default=None, description="New user-friendly label with spaces, e.g. 'Order Date'; omit to keep current label.")
     description: str | None = Field(default=None, description="New one-sentence business description; omit to keep current description.")
+    add_synonyms: list[str] | None = Field(
+        default=None, description="The user's own words for this column to append, e.g. '주문 상태' for Order Status; search finds the column by them."
+    )
 
 
 class EntityColumn(BaseModel):

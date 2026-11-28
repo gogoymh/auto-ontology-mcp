@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from .errors import KnowledgeError
 from .naming import clean_label
-from .semantic import DEFAULT_MIN_SIMILARITY, VectorHit, rrf_fuse
+from .semantic import VectorHit, rrf_fuse
 from .store import new_id, now
 from .vault import wikilink
 
@@ -735,7 +735,7 @@ class TextIndex:
         source: int | None = None,
         term: str | None = None,
         *,
-        min_similarity: float = DEFAULT_MIN_SIMILARITY,
+        min_similarity: float | None = None,
     ) -> dict[str, Any]:
         ds = self.k.ds(create=False)
         words = query_words(query)

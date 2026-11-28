@@ -142,6 +142,7 @@ CREATE TABLE IF NOT EXISTS column_attribute (
     column_id TEXT NOT NULL REFERENCES catalog_column(id) ON DELETE CASCADE,
     display_name TEXT NOT NULL,
     description TEXT,
+    synonyms TEXT,
     UNIQUE (term_id, column_id)
 );
 
@@ -220,6 +221,9 @@ _MIGRATIONS: dict[str, list[tuple[str, str]]] = {
     ],
     "catalog_column": [
         ("list_separator", "TEXT"),
+    ],
+    "column_attribute": [
+        ("synonyms", "TEXT"),
     ],
     "term": [
         ("kind", "TEXT NOT NULL DEFAULT 'entity'"),

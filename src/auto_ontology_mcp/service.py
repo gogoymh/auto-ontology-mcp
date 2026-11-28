@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import difflib
 import json
+import logging
+import time
 from collections import defaultdict
 from typing import Any
 
@@ -32,10 +34,18 @@ from .knowledge import KNOWLEDGE_DS, SOURCES_TABLE, Knowledge, is_builtin
 from .naming import clean_label, compact, id_base, to_label
 from .profiling import is_numeric_type
 from .search import KINDS as SEARCH_DOC_KINDS, NAME_SUFFIX, Doc, build_docs, doc_text, name_text, search
-from .semantic import ONTOLOGY_MIN_SEMANTIC, VectorIndex, content_hash
+from .semantic import ANSWERABLE_MARGIN, LEARN_FLOOR_RATIO, VectorIndex, content_hash
 from .sqlcheck import SqlGuardError, analyze, extract_expressions, first_statement, guard_readonly, guard_sources, normalize_sql
 from .store import Store, new_id, now
 from .validation import Validator, limited, qtable
+
+logger = logging.getLogger(__name__)
+
+# A search that finds nothing by its own words is remembered this long (seconds) so the next
+# search, usually the model's translation, can offer to save it as a synonym.
+LEARN_WINDOW_S = 600
+LEARN_MEMORY = 5
+LEARN_CANDIDATES = 3
 
 TERM_STATUSES = ("draft", "certified", "deprecated")
 SQL_ATTR_KINDS = ("measure", "filter", "dimension", "join", "query")
@@ -81,8 +91,11 @@ class OntologyService:
             enabled=settings.semantic_search,
             model_name=settings.embedding_model,
             cache_dir=settings.embedding_cache_dir,
+            min_similarity=settings.min_similarity,
         )
         self._synced_ontology_digest: dict[str, tuple[str, str]] = {}
+        # (datasource id, phrase, monotonic time) of recent searches that matched nothing by their words.
+        self._missed: list[tuple[str, str, float]] = []
         # The per-revision cached document list last synced per datasource: the same list object
         # means the same documents, so the vector sync skips hashing every document again.
         self._synced_docs: dict[str, tuple[Any, list[Any]]] = {}
@@ -610,12 +623,21 @@ class OntologyService:
             marks = ",".join("?" for _ in col_ids)
             term_ids = [t["id"] for t in saved] + [p["id"] for p in existing.values() if p["name"] in kept]
             tmarks = ",".join("?" for _ in term_ids)
+            # Remodelling keeps the user's own words saved on a column (update_term column add_synonyms).
+            kept_syns = {
+                (r["term_id"], r["column_id"]): r["synonyms"]
+                for r in con.execute(
+                    f"SELECT term_id, column_id, synonyms FROM column_attribute WHERE column_id IN ({marks}) AND term_id IN ({tmarks}) AND synonyms IS NOT NULL",
+                    (*col_ids, *term_ids),
+                )
+            }
             con.execute(f"DELETE FROM column_attribute WHERE column_id IN ({marks}) AND term_id IN ({tmarks})", (*col_ids, *term_ids))
             for t in saved:
                 for c in t["columns"]:
                     self.store.insert(
                         "column_attribute",
-                        {"id": new_id("attr"), "term_id": t["id"], "column_id": c["column"]["id"], "display_name": c["display_name"], "description": c["description"]},
+                        {"id": new_id("attr"), "term_id": t["id"], "column_id": c["column"]["id"], "display_name": c["display_name"], "description": c["description"],
+                         "synonyms": kept_syns.get((t["id"], c["column"]["id"]))},
                         con,
                     )
             for col_name, desc in (column_descriptions or {}).items():
@@ -1132,6 +1154,12 @@ class OntologyService:
                     upd["display_name"] = clean_label(cu["display_name"])
                 if cu.get("description") is not None:
                     upd["description"] = cu["description"]
+                col_syns = list(a.get("synonyms") or [])
+                for syn in cu.get("add_synonyms") or []:
+                    if syn and syn.strip() and syn.strip().casefold() not in {x.casefold() for x in col_syns}:
+                        col_syns.append(syn.strip())
+                if col_syns != (a.get("synonyms") or []):
+                    upd["synonyms"] = col_syns
                 if upd:
                     self.store.update("column_attribute", a["id"], upd)
                     changed_attrs.append(a["column_name"])
@@ -1235,11 +1263,13 @@ class OntologyService:
         limit: int = 10,
         docs=None,
         *,
-        min_semantic: float = ONTOLOGY_MIN_SEMANTIC,
+        min_semantic: float | None = None,
     ) -> list[dict[str, Any]]:
         doc_list = docs if docs is not None else self._docs(ds)
         if not self.vectors.is_available():
             return search(query, doc_list, kinds=kinds, limit=limit)
+        if min_semantic is None:
+            min_semantic = self.vectors.min_similarity
         self._sync_ontology_vectors(ds, doc_list)
         wanted = [k for k in (kinds or SEARCH_DOC_KINDS) if k in SEARCH_DOC_KINDS] or list(SEARCH_DOC_KINDS)
         vec_hits = self.vectors.search(
@@ -1284,7 +1314,69 @@ class OntologyService:
             if semantic_on
             else "Nothing matched lexically. Try the schema's own words, a synonym, singular/plural, or translate the phrase."
         )
+        learn = self._learn_suggestion(ds, query, hits)
+        if learn:
+            out["learn"] = learn
         return out
+
+    def _learn_suggestion(self, ds: dict[str, Any], query: str, hits: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """Turn a missed phrase into an update_term call once a later search finds what it meant.
+
+        The embedding model alone cannot tie every phrase to the schema: "주문 상태" sits at 0.31
+        from "Order Status" with the default model, below unrelated names such as "Tag". So a
+        search that matches nothing by its own words is remembered, and when the next search (the
+        model's translation, "Order Status") hits a Term or column by its words, the reply names
+        the update_term call that saves the user's phrase there. With embeddings on, a pairing is
+        offered only when the phrase is at least loosely close to the hit (half the model's floor),
+        which drops unrelated misses such as "astrophysics telescope" (0.09 from "Order").
+        """
+        phrase = (query or "").strip()
+        if not phrase:
+            return None
+        stamp = time.monotonic()
+        recent = [m for m in self._missed if m[0] == ds["id"] and stamp - m[2] <= LEARN_WINDOW_S]
+        lexical = [h for h in hits if h.get("match") != "semantic"]
+        if not lexical:
+            self._missed = [m for m in recent if m[1].casefold() != phrase.casefold()][-(LEARN_MEMORY - 1):] + [(ds["id"], phrase, stamp)]
+            logger.info("search_ontology: no lexical match for %r in %s; remembered for a synonym suggestion", phrase, ds["name"])
+            return {
+                "phrase": phrase,
+                "hint": (
+                    "Nothing matched these words directly. Search again with the schema's own words (translate the phrase); "
+                    "the reply will offer the update_term call that saves this phrase as a synonym."
+                ),
+            }
+        targets = [h for h in lexical if h["kind"] in ("term", "attribute")][:LEARN_CANDIDATES]
+        if not recent or not targets:
+            return None
+        _, missed, _ = recent[-1]
+        if missed.casefold() == phrase.casefold():
+            return None
+        if self.vectors.is_available():
+            floor = self.vectors.min_similarity * LEARN_FLOOR_RATIO
+            sims = self.vectors.similarities(missed, [h["name"].rsplit(" › ", 1)[-1] for h in targets])
+            if sims is not None:
+                targets = [h for h, sim in zip(targets, sims) if sim >= floor]
+        self._missed = [m for m in self._missed if m[1] != missed]
+        if not targets:
+            logger.info("search_ontology: %r is not close to the hits for %r; no synonym suggestion", missed, phrase)
+            return None
+        candidates = []
+        for h in targets:
+            if h["kind"] == "term":
+                call = {"term": h["name"], "add_synonyms": [missed]}
+            else:
+                call = {"term": h["term"], "column_updates": [{"column": h["column"].rsplit(".", 1)[-1], "add_synonyms": [missed]}]}
+            candidates.append({"kind": h["kind"], "name": h["name"], "update_term": call})
+        logger.info("search_ontology: suggesting %r as a synonym of %s", missed, ", ".join(c["name"] for c in candidates))
+        return {
+            "phrase": missed,
+            "hint": (
+                f"The earlier search for {missed!r} matched nothing by its own words. If the user meant one of these, "
+                "call update_term with its arguments so the phrase finds it directly next time."
+            ),
+            "candidates": candidates,
+        }
 
     def get_term(self, term: str, datasource: str | None = None, brief: bool = False) -> dict[str, Any]:
         ds = self.ds(datasource)
@@ -1307,7 +1399,8 @@ class OntologyService:
             out["attributes"] = [a["display_name"] for a in attrs]
             return out
         out["attributes"] = [
-            {"name": a["display_name"], **self._column_view({**a, "name": a["column_name"], "description": a.get("description")})}
+            {"name": a["display_name"], **({"synonyms": a["synonyms"]} if a.get("synonyms") else {}),
+             **self._column_view({**a, "name": a["column_name"], "description": a.get("description")})}
             for a in attrs
         ]
         out["sql_attributes"] = [_sql_attr_view(s) for s in self.store.sql_attributes(t["id"])]
@@ -1539,7 +1632,8 @@ class OntologyService:
         value_budget = [60]  # columns probed across the whole question
         for ent in entities:
             found = self._search(
-                ds, ent, kinds=["term", "attribute", "sql_attribute", "glossary", "table"], limit=6, docs=docs, min_semantic=0.75
+                ds, ent, kinds=["term", "attribute", "sql_attribute", "glossary", "table"], limit=6, docs=docs,
+                min_semantic=self.vectors.min_similarity + ANSWERABLE_MARGIN,
             )
             # As upstream, the glossary interprets a phrase and the semantic model covers it: a glossary
             # entry is never the match itself, its definition is looked up instead.
@@ -2003,7 +2097,8 @@ class OntologyService:
                     "description": t.get("description"),
                     "synonyms": t.get("synonyms") or [],
                     "columns": [
-                        {"column": a["column_name"], "display_name": a["display_name"], **({"description": a["description"]} if a.get("description") else {})}
+                        {"column": a["column_name"], "display_name": a["display_name"], **({"description": a["description"]} if a.get("description") else {}),
+                         **({"synonyms": a["synonyms"]} if a.get("synonyms") else {})}
                         for a in self.store.term_attributes(t["id"])
                     ],
                     "sql_attributes": [
@@ -2102,8 +2197,12 @@ class OntologyService:
                     datasource=ds["name"],
                 )
                 for t in tlist:
-                    if t.get("status") and t["status"] != "draft":
-                        self.update_term(t["name"], status=t["status"], datasource=ds["name"])
+                    col_syns = [{"column": c["column"], "add_synonyms": c["synonyms"]} for c in t.get("columns") or [] if c.get("synonyms")]
+                    if (t.get("status") and t["status"] != "draft") or col_syns:
+                        self.update_term(
+                            t["name"], status=t["status"] if t.get("status") != "draft" else None,
+                            column_updates=col_syns or None, datasource=ds["name"],
+                        )
                     report["terms"].append(t["name"])
                     for s in t.get("sql_attributes") or []:
                         try:

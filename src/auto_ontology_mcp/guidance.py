@@ -70,13 +70,15 @@ originals.
 _SEARCH_LEXICAL = """\
 Search is lexical, not semantic. Search with the words the schema uses; if the user writes in \
 another language, translate entity phrases to the ontology's language first, and try synonyms. \
-Add the user's own words as Term synonyms with update_term so the next search finds them.
+Add the user's own words as Term synonyms with update_term so the next search finds them; when a \
+reply carries learn.candidates, that is the update_term call (a column's words go in column_updates).
 """
 _SEARCH_HYBRID = """\
 Search is hybrid: search_ontology and search_text fuse lexical matching with local embeddings \
 (search_mode "hybrid"), so synonyms, paraphrases and other languages already match. Search once \
 with the user's own words; do not translate or retry with synonyms unless the results miss. \
-Add the user's own words as Term synonyms with update_term when they name a Term exactly.
+When a reply carries learn, the phrase matched nothing by its own words: search again with the \
+schema's words, and once the user confirms the hit, run the update_term call in learn.candidates.
 """
 
 

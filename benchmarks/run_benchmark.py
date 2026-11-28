@@ -46,7 +46,7 @@ from typing import Any
 from auto_ontology_mcp.config import Settings
 from auto_ontology_mcp.demo import build_demo_database
 from auto_ontology_mcp.demo_knowledge import seed_demo_knowledge
-from auto_ontology_mcp.semantic import normalize_vector
+from auto_ontology_mcp.semantic import model_disk_bytes, normalize_vector
 from auto_ontology_mcp.service import OntologyService
 
 logger = logging.getLogger("auto_ontology_mcp.benchmark")
@@ -144,6 +144,7 @@ def _make_service(
     semantic: bool = False,
     embedder: Any = None,
     use_sqlite_vec: bool | None = None,
+    model: str | None = None,
 ) -> tuple[OntologyService, float]:
     """Build an isolated service; core benchmarks stay lexical so results never depend on a model."""
     settings = replace(
@@ -155,6 +156,8 @@ def _make_service(
         allow_datasource_tools=True,
         semantic_search=semantic,
     )
+    if model:
+        settings = replace(settings, embedding_model=model)
     svc = OntologyService(settings)
     if semantic and embedder is not None:
         svc.vectors._embedder = embedder
@@ -748,9 +751,12 @@ def run_semantic_benchmark(
     warmup: int = 1,
     iterations: int = 3,
     embedder: Any = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Compare lexical-only and hybrid search on the semantic task set.
 
+    ``model`` picks the fastembed model (a name or alias such as ``mpnet``; default: the
+    configured one) and the hybrid results record its cosine floor, load time and disk size.
     ``embedder`` replaces the fastembed model (tests use a deterministic stub). Raises
     RuntimeError when hybrid search is unavailable (the ``semantic`` extra is missing).
     """
@@ -763,18 +769,28 @@ def run_semantic_benchmark(
         tmp_path = Path(tmp)
         demo_db = build_demo_database(tmp_path / "demo.sqlite", seed=int(spec.get("seed", 7)))
         for mode in SEMANTIC_MODES:
-            svc, _ = _make_service(tmp_path / mode, demo_db, semantic=mode == "hybrid", embedder=embedder)
+            svc, _ = _make_service(tmp_path / mode, demo_db, semantic=mode == "hybrid", embedder=embedder, model=model)
             if mode == "hybrid" and not svc.vectors.is_available():
                 raise RuntimeError(
                     "Hybrid search is unavailable: "
                     + str(svc.semantic_status().get("reason"))
                     + ". Install with `uv sync --extra semantic`."
                 )
+            load_ms = 0.0
+            if mode == "hybrid" and embedder is None:
+                # Load (and download on first use) the model outside the timed passes.
+                t0 = time.perf_counter()
+                svc.vectors.similarities("warm up", ["model"])
+                load_ms = (time.perf_counter() - t0) * 1000.0
             _apply_setup(svc, spec["setup"])
             logger.info("semantic benchmark: running %d tasks in %s mode", len(tasks_spec), mode)
             modes[mode] = _eval_semantic_mode(svc, tasks_spec, warmup=warmup, iterations=iterations)
             if mode == "hybrid":
                 modes[mode]["model"] = svc.vectors.model_name
+                modes[mode]["min_similarity"] = svc.vectors.min_similarity
+                modes[mode]["model_load_ms"] = round(load_ms, 1)
+                disk = model_disk_bytes(svc.vectors.model_name, svc.settings.embedding_cache_dir)
+                modes[mode]["model_disk_mb"] = round(disk / 1e6, 1) if disk is not None else None
 
     lex, hyb = modes["lexical"], modes["hybrid"]
     key = f"recall_at_{SEMANTIC_RECALL_K}"
@@ -1097,6 +1113,12 @@ def _format_semantic_text(sem: dict[str, Any]) -> str:
             f"neg={m['negative_precision']:.2f}  p50={m['latency_ms']['p50']:.3f}ms  "
             f"p95={m['latency_ms']['p95']:.3f}ms  cold={m['cold_pass_ms']:.1f}ms"
         )
+    h = sem["modes"]["hybrid"]
+    if h.get("model_load_ms") is not None:
+        lines.append(
+            f"  - model    floor={h.get('min_similarity')}  load={h['model_load_ms']:.0f}ms  "
+            f"disk={h.get('model_disk_mb') if h.get('model_disk_mb') is not None else '?'}MB"
+        )
     d = sem["delta"]
     lines.append(
         f"  - delta    recall@{sem['recall_k']} {d[key]:+.4f}  mrr {d['mrr']:+.4f}  p50 {d['p50_ms']:+.3f}ms"
@@ -1235,6 +1257,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Also compare lexical-only and hybrid (fastembed + sqlite-vec) recall and latency on the semantic task set.",
     )
+    parser.add_argument(
+        "--embedding-model",
+        default=None,
+        help="Embedding model for --semantic: a fastembed name or alias (minilm, mpnet). Default: AUTO_ONTOLOGY_EMBEDDING_MODEL or MiniLM.",
+    )
     parser.add_argument("--format", choices=("text", "markdown", "json"), default="text", help="Output format.")
     parser.add_argument(
         "--summary-file",
@@ -1281,7 +1308,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.semantic:
         try:
             result["semantic_search"] = run_semantic_benchmark(
-                args.tasks, warmup=args.warmup, iterations=args.iterations
+                args.tasks, warmup=args.warmup, iterations=args.iterations, model=args.embedding_model
             )
         except RuntimeError as exc:
             logger.error("semantic benchmark failed: %s", exc)
