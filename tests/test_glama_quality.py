@@ -278,11 +278,9 @@ def test_ci_workflow_fetches_tags_and_runs_semantic_tests():
     assert checkout_with.get("fetch-depth") == 0
     assert checkout_with.get("fetch-tags") is True
 
-    cache = next(s for s in steps if isinstance(s, dict) and str(s.get("uses", "")).startswith("actions/cache@"))
-    cache_with = cache.get("with") or {}
-    cache_path = cache_with.get("path")
-    assert isinstance(cache_path, str) and cache_path.strip()
-    assert isinstance(cache_with.get("key"), str) and "fastembed" in cache_with["key"]
+    assert not any(
+        isinstance(s, dict) and str(s.get("uses", "")).startswith("actions/cache@") for s in steps
+    )
 
     sync_idx = next(
         i for i, s in enumerate(steps) if isinstance(s, dict) and "uv sync --extra semantic" in (s.get("run") or "")
@@ -295,5 +293,8 @@ def test_ci_workflow_fetches_tags_and_runs_semantic_tests():
         and "test_benchmark_semantic_model.py" in (s.get("run") or "")
     )
     assert sync_idx < sem_idx
+    sem_run = sem_step.get("run") or ""
+    assert "--durations=0" in sem_run and "--durations-min=0" in sem_run
     sem_env = sem_step.get("env") or {}
-    assert sem_env.get("AUTO_ONTOLOGY_EMBEDDING_CACHE") == cache_path
+    assert str(sem_env.get("AO_REQUIRE_SEMANTIC")) == "1"
+    assert "AUTO_ONTOLOGY_EMBEDDING_CACHE" not in sem_env

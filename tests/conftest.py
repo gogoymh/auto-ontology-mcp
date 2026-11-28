@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -7,7 +8,14 @@ import pytest
 
 from auto_ontology_mcp.config import Settings
 from auto_ontology_mcp.demo import build_demo_database
+from auto_ontology_mcp.semantic import FastEmbedder, resolve_model_name, semantic_dependencies_available
 from auto_ontology_mcp.service import OntologyService
+
+TESTS_DIR = str(Path(__file__).resolve().parent)
+if TESTS_DIR not in sys.path:
+    sys.path.insert(0, TESTS_DIR)
+
+from strict_skip import REQUIRE_SEMANTIC_ENV, skip_unless_required  # noqa: E402
 
 # What a host model would propose for the demo tables (one Term per table).
 DEMO_TERMS: dict[str, list[dict]] = {
@@ -72,3 +80,12 @@ def modeled(svc: OntologyService) -> OntologyService:
     for table, terms in DEMO_TERMS.items():
         svc.save_table_terms(table, terms)
     return svc
+
+
+@pytest.fixture(scope="session")
+def semantic_model():
+    """Load the configured fastembed model once per session and share it via _MODEL_CACHE."""
+    if not semantic_dependencies_available():
+        skip_unless_required("semantic extra not installed", REQUIRE_SEMANTIC_ENV)
+    cfg = Settings.from_env()
+    return FastEmbedder(resolve_model_name(cfg.embedding_model), cache_dir=cfg.embedding_cache_dir)._model()
