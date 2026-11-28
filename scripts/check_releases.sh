@@ -3,6 +3,10 @@
 # Usage: scripts/check_releases.sh published   # every local v* tag is on origin and has a Release
 #        scripts/check_releases.sh workflow    # HEAD carries release.yml, so a new v* tag from here releases itself
 #        scripts/check_releases.sh latest      # the newest tag is marked Latest on GitHub
+#        scripts/check_releases.sh main        # origin/main carries release.yml
+#        scripts/check_releases.sh tagged vX   # tag vX on origin points at a commit with that version and release.yml
+#        scripts/check_releases.sh auto vX     # the Release for vX was created by the release workflow
+#        scripts/check_releases.sh glama       # the Glama score badge rates maintenance A
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 wf=.github/workflows/release.yml
@@ -47,5 +51,35 @@ case "${1:-}" in
     [ "$newest" = "$latest" ] || { echo "Latest release is $latest, newest tag is $newest"; exit 1; }
     echo "ok: $latest is Latest"
     ;;
-  *) echo "usage: $0 published|workflow|latest" >&2; exit 2 ;;
+  main)
+    git fetch -q origin main
+    git cat-file -e "origin/main:$wf" 2>/dev/null || { echo "origin/main has no $wf"; exit 1; }
+    echo "ok: origin/main carries $wf"
+    ;;
+  tagged)
+    tag=${2:?tag required}
+    sha=$(git ls-remote --tags origin "refs/tags/$tag^{}" | cut -f1)
+    [ -n "$sha" ] || sha=$(git ls-remote --tags origin "refs/tags/$tag" | cut -f1)
+    [ -n "$sha" ] || { echo "tag $tag is not on origin"; exit 1; }
+    git cat-file -e "$sha^{commit}" 2>/dev/null || git fetch -q origin "refs/tags/$tag:refs/tags/$tag"
+    git cat-file -e "$sha:$wf" 2>/dev/null || { echo "$tag ($sha) has no $wf"; exit 1; }
+    pkg=$(git show "$sha:src/auto_ontology_mcp/__init__.py" | sed -n 's/^__version__ = "\(.*\)"/\1/p')
+    proj=$(git show "$sha:pyproject.toml" | sed -n 's/^version = "\(.*\)"/\1/p' | head -1)
+    [ "v$pkg" = "$tag" ] && [ "v$proj" = "$tag" ] || { echo "$tag has __version__ $pkg, pyproject $proj"; exit 1; }
+    echo "ok: $tag -> $sha with version $pkg and $wf"
+    ;;
+  auto)
+    tag=${2:?tag required}
+    author=$(gh release view "$tag" --json author --jq .author.login) || { echo "no Release for $tag"; exit 1; }
+    case "$author" in github-actions*|app/github-actions) ;; *) echo "Release $tag was created by $author, not the workflow"; exit 1 ;; esac
+    run=$(gh run list --workflow release.yml --branch "$tag" --json conclusion --jq '.[0].conclusion')
+    [ "$run" = success ] || { echo "release workflow run for $tag: ${run:-none}"; exit 1; }
+    echo "ok: $tag released by $author (workflow $run)"
+    ;;
+  glama)
+    desc=$(curl -fsSL "https://glama.ai/mcp/servers/gogoymh/auto-ontology-mcp/badges/score.svg?t=$(date +%s)" | sed -n 's:.*<desc>\(.*\)</desc>.*:\1:p')
+    grep -q 'maintenance rated A' <<<"$desc" || { echo "Glama: $desc"; exit 1; }
+    echo "ok: $desc"
+    ;;
+  *) echo "usage: $0 published|workflow|latest|main|tagged vX|auto vX|glama" >&2; exit 2 ;;
 esac
