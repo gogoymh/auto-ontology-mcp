@@ -454,8 +454,8 @@ class Validator:
         checked: set[tuple[str, str, str]] = set()
         for f in analysis.string_filters:
             col = self._col(f["column"])
-            if not col:
-                continue
+            if not col or col.get("pii"):
+                continue  # a PII column's values are never probed: a match would confirm one
             for value in f["values"][:10]:
                 key = (col["id"], f["op"], value)
                 if key in checked:
@@ -591,6 +591,8 @@ class Validator:
 
     def _range(self, col: dict[str, Any]) -> tuple[float, float] | None:
         """The column's numeric min and max in the data, probed once per validation."""
+        if col.get("pii"):
+            return None
         if col["id"] not in self._ranges:
             try:
                 rows = self._probe(

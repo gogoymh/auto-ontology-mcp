@@ -16,7 +16,7 @@ import yaml
 from sqlglot import exp
 
 from . import __version__, guidance
-from .catalog import Scanner, TableFilter
+from .catalog import PiiPatterns, Scanner, TableFilter
 from .config import Settings, split_patterns
 from .datasources import (
     Connections,
@@ -103,6 +103,19 @@ class OntologyService:
         # Documents are rebuilt per search today; one entry per datasource, keyed on the store's
         # revision, removes the rebuild without ever serving a stale set.
         self._docs_cache: dict[str, tuple[int, list[Any]]] = {}
+        self._apply_pii_tags()
+
+    def _apply_pii_tags(self) -> None:
+        """Tag PII columns already in the catalog, so patterns set since the last scan hold at once."""
+        for ds in self.store.datasources():
+            try:
+                self.scanner.tag_pii(ds, self._pii_patterns(ds))
+            except Exception:  # noqa: BLE001
+                logger.warning("Could not apply PII tags to %s", ds["name"], exc_info=True)
+
+    def _pii_patterns(self, ds: dict[str, Any], extra: list[str] | None = None) -> PiiPatterns:
+        """PII patterns for *ds*: the environment's, the datasource's saved ones, then *extra*."""
+        return PiiPatterns.parse([*self.settings.pii_columns, *(ds.get("pii_columns") or []), *(extra or [])])
 
     def semantic_status(self) -> dict[str, Any]:
         return self.vectors.status()
@@ -266,7 +279,7 @@ class OntologyService:
     # ============================================================== datasources
     def add_datasource(
         self, name: str, url: str, description: str | None = None, schemas: list[str] | None = None, scan: bool = True,
-        tables: list[str] | None = None,
+        tables: list[str] | None = None, pii_columns: list[str] | None = None,
     ) -> dict[str, Any]:
         if not self.settings.allow_datasource_tools:
             raise OntologyError("Adding datasources over MCP is disabled on this server (AUTO_ONTOLOGY_ALLOW_DATASOURCE_TOOLS=0).")
@@ -288,6 +301,8 @@ class OntologyService:
             "schemas": schemas or None,
             # Re-adding a datasource (say, a new password) keeps its saved filter; ['*'] clears it.
             "table_filter": split_patterns(tables) or (existing or {}).get("table_filter") or None,
+            # PII patterns only accumulate: a re-add without them must not lift a tag.
+            "pii_columns": _merged_patterns((existing or {}).get("pii_columns"), pii_columns),
             "created_at": existing["created_at"] if existing else now(),
         }
         self.connections.forget(ds["id"])
@@ -329,11 +344,18 @@ class OntologyService:
 
     def scan_datasource(
         self, datasource: str | None = None, schemas: list[str] | None = None, profile: bool = True,
-        tables: list[str] | None = None,
+        tables: list[str] | None = None, pii_columns: list[str] | None = None,
     ) -> dict[str, Any]:
         ds = self.ds(datasource)
+        if split_patterns(pii_columns):
+            merged = _merged_patterns(ds.get("pii_columns"), pii_columns)
+            self.store.update("datasource", ds["id"], {"pii_columns": merged})
+            self.store.log("datasource", ds["id"], "pii_columns", {"patterns": merged})
+            ds = {**ds, "pii_columns": merged}
         table_filter, filter_source = self._table_filter(ds, tables)
-        summary = self.scanner.scan(ds, schemas=schemas, profile=profile, tables=table_filter)
+        summary = self.scanner.scan(
+            ds, schemas=schemas, profile=profile, tables=table_filter, pii=self._pii_patterns(ds)
+        )
         if table_filter is not None:
             summary["table_filter_source"] = filter_source
         ds = self.ds(ds["name"])
@@ -396,6 +418,9 @@ class OntologyService:
         out: dict[str, Any] = {"column": c["name"], "type": c.get("data_type")}
         if c.get("description"):
             out["description"] = c["description"]
+        if c.get("pii"):
+            out["pii"] = "Tagged PII: the server withholds its values."
+            return out
         samples = c.get("sample_values")
         if samples:
             if c.get("value_set_complete"):
@@ -1824,7 +1849,7 @@ class OntologyService:
         candidates = []
         for a in self.store.attributes_for_datasource(ds["id"]):
             dtype = (a.get("data_type") or "").lower()
-            if a.get("format") or id_base(a["column_name"]) is not None:
+            if a.get("pii") or a.get("format") or id_base(a["column_name"]) is not None:
                 continue
             if not any(k in dtype for k in ("char", "text", "string", "clob", "enum")) and dtype:
                 continue
@@ -1944,6 +1969,12 @@ class OntologyService:
     def lookup_values(self, column: str, contains: str | None = None, limit: int = 20, datasource: str | None = None) -> dict[str, Any]:
         ds = self.ds(datasource)
         col = self.column_ref(ds, column)
+        if col.get("pii"):
+            logger.info("lookup_values refused on PII column %s.%s", col["table_name"], col["name"])
+            raise OntologyError(
+                f"{col['table_name']}.{col['name']} is tagged PII, so the server does not return its values. "
+                "Do not filter on a guessed value; ask the user for the exact value if the question needs one."
+            )
         dialect = self.dialect(ds)
         table = qtable(col.get("schema_name") or None, col["table_name"])
         c = exp.column(exp.to_identifier(col["name"], quoted=True))
@@ -2268,6 +2299,12 @@ class OntologyService:
         return results[:10]
 
 
+def _merged_patterns(saved: list[str] | None, added: list[str] | None) -> list[str] | None:
+    """Saved patterns followed by the new ones, without repeats."""
+    merged = list(dict.fromkeys([*split_patterns(saved), *split_patterns(added)]))
+    return merged or None
+
+
 def _num(v: Any) -> float | None:
     try:
         return float(v)
@@ -2285,6 +2322,8 @@ def _column_line(a: dict[str, Any]) -> str:
     if a.get("name") and a["name"].casefold() != a["column"].casefold():
         head += f" [{a['name']}]"
     flags = [a.get("type") or "?"]
+    if a.get("pii"):
+        flags.append("PII, values withheld")
     if a.get("unique_in_sample"):
         flags.append("unique")
     if a.get("null_fraction"):

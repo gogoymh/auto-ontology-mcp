@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS datasource (
     description TEXT,
     schemas TEXT,
     table_filter TEXT,
+    pii_columns TEXT,
     created_at TEXT NOT NULL,
     scanned_at TEXT
 );
@@ -73,6 +74,7 @@ CREATE TABLE IF NOT EXISTS catalog_column (
     format TEXT,
     value_set_complete INTEGER NOT NULL DEFAULT 0,
     list_separator TEXT,
+    pii INTEGER NOT NULL DEFAULT 0,
     UNIQUE (table_id, name)
 );
 
@@ -212,15 +214,17 @@ CREATE INDEX IF NOT EXISTS idx_rel_target ON relationship (target_column_id);
 CREATE INDEX IF NOT EXISTS idx_term_table ON term (primary_table_id);
 """
 
-JSON_FIELDS = {"schemas", "table_filter", "pk", "sample_values", "evidence", "synonyms", "validation", "terms", "detail", "spec"}
+JSON_FIELDS = {"schemas", "table_filter", "pii_columns", "pk", "sample_values", "evidence", "synonyms", "validation", "terms", "detail", "spec"}
 
 # Columns added after the first release; ALTER TABLE brings older stores up to date.
 _MIGRATIONS: dict[str, list[tuple[str, str]]] = {
     "datasource": [
         ("table_filter", "TEXT"),
+        ("pii_columns", "TEXT"),
     ],
     "catalog_column": [
         ("list_separator", "TEXT"),
+        ("pii", "INTEGER NOT NULL DEFAULT 0"),
     ],
     "column_attribute": [
         ("synonyms", "TEXT"),
@@ -456,7 +460,7 @@ class Store:
         return self.all(
             """
             SELECT a.*, c.name AS column_name, c.data_type, c.sample_values, c.is_unique,
-                   c.format, c.null_fraction, c.min_value, c.max_value, c.value_set_complete, c.list_separator,
+                   c.format, c.null_fraction, c.min_value, c.max_value, c.value_set_complete, c.list_separator, c.pii,
                    t.id AS table_id, t.name AS table_name, t.schema_name AS schema_name
             FROM column_attribute a
             JOIN catalog_column c ON c.id = a.column_id
@@ -471,7 +475,7 @@ class Store:
             """
             SELECT a.*, tm.name AS term_name, tm.status AS term_status,
                    c.name AS column_name, c.data_type, c.table_id, c.sample_values,
-                   c.format, c.value_set_complete, c.is_unique, c.list_separator,
+                   c.format, c.value_set_complete, c.is_unique, c.list_separator, c.pii,
                    t.name AS table_name, t.schema_name AS schema_name
             FROM column_attribute a
             JOIN term tm ON tm.id = a.term_id

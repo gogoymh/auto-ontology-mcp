@@ -3,6 +3,11 @@
 Follows Auto Ontology's ``calculate_columns_profiling`` (Apache-2.0, NVIDIA):
 sample up to N rows, record uniqueness and the most common values per column,
 probe the full distinct set of small text enums, and infer date notations.
+
+Columns tagged PII are never profiled, following Auto Ontology's PII value
+withholding (87583ba9, 3eb8fa6b): their values stay out of the sample query, the
+DISTINCT probes and the store, and when the tags cannot be read nothing is
+sampled and every stored value profile is cleared.
 """
 
 from __future__ import annotations
@@ -40,6 +45,38 @@ _INDISTINGUISHABLE = (
     frozenset({"DD/MM/YYYY", "MM/DD/YYYY"}),
     frozenset({"DD-MM-YYYY", "MM-DD-YYYY"}),
 )
+
+
+# Every catalog_column field profiling derives from a column's values, as it is stored when the
+# values are withheld (a PII column, or a table whose PII tags could not be read).
+EMPTY_PROFILE: dict[str, Any] = {
+    "sample_values": None,
+    "list_separator": None,
+    "is_unique": None,
+    "null_fraction": None,
+    "distinct_in_sample": None,
+    "min_value": None,
+    "max_value": None,
+    "format": None,
+    "value_set_complete": False,
+    "needs_distinct_probe": False,
+}
+
+
+def pii_column_names(columns: Iterable[dict[str, Any]]) -> set[str]:
+    """Names of the catalog *columns* tagged PII, which are never sampled.
+
+    Raises LookupError when a column carries no readable tag: guessing that it is not PII
+    would move exactly the values the tag guards.
+    """
+    names: set[str] = set()
+    for col in columns:
+        tag = col.get("pii")
+        if tag is None:
+            raise LookupError(f"the PII tag of column {col.get('name')!r} is unreadable")
+        if tag:
+            names.add(col["name"])
+    return names
 
 
 def is_text_type(data_type: str | None) -> bool:
@@ -133,17 +170,25 @@ def _json_ready(value: Any) -> Any:
 
 
 def profile_rows(
-    columns: list[dict[str, Any]], column_names: list[str], rows: list[list[Any]]
+    columns: list[dict[str, Any]],
+    column_names: list[str],
+    rows: list[list[Any]],
+    pii_columns: set[str] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Profile each column of a row sample.
 
     Returns ``{column: {sample_values, is_unique, null_fraction,
     distinct_in_sample, min_value, max_value, format, needs_distinct_probe}}``.
+    A column in *pii_columns* gets :data:`EMPTY_PROFILE` whatever the sample holds.
     """
+    pii_columns = pii_columns or set()
     type_by_name = {c["name"]: c.get("data_type") for c in columns}
     total = len(rows)
     out: dict[str, dict[str, Any]] = {}
     for idx, name in enumerate(column_names):
+        if name in pii_columns:
+            out[name] = dict(EMPTY_PROFILE)
+            continue
         raw = [row[idx] for row in rows]
         values = [_json_ready(v) for v in raw if v is not None]
         keys = [_sample_key(v) for v in values]

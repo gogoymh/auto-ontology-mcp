@@ -23,6 +23,11 @@ TABLES_HELP = (
     "comma-separated table globs, e.g. 'SALES_*,HR.EMP*,!*_LOG' (default: AUTO_ONTOLOGY_SCAN_TABLES, else all tables)"
 )
 
+PII_HELP = (
+    "comma-separated globs of columns holding personal data, e.g. 'email,users.phone,!users.nickname': never sampled "
+    "or returned by the server's probes (added to AUTO_ONTOLOGY_PII_COLUMNS, saved with the datasource)"
+)
+
 
 def _settings():
     from .config import Settings
@@ -130,11 +135,13 @@ def cmd_add(args: argparse.Namespace) -> None:
     svc = _service()
     schemas = [s.strip() for s in args.schemas.split(",")] if args.schemas else None
     tables = _split(args.tables)
-    _print(svc.add_datasource(args.name, args.url, args.description, schemas, scan=not args.no_scan, tables=tables))
+    _print(svc.add_datasource(args.name, args.url, args.description, schemas, scan=not args.no_scan, tables=tables,
+                          pii_columns=_split(args.pii_columns)))
 
 
 def cmd_scan(args: argparse.Namespace) -> None:
-    _print(_service().scan_datasource(args.name, profile=not args.no_profile, tables=_split(args.tables)))
+    _print(_service().scan_datasource(args.name, profile=not args.no_profile, tables=_split(args.tables),
+                                     pii_columns=_split(args.pii_columns)))
 
 
 def _split(raw: str | None) -> list[str] | None:
@@ -223,6 +230,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--description", default=None)
     p.add_argument("--schemas", default=None, help="comma-separated schemas to include")
     p.add_argument("--tables", default=None, help=TABLES_HELP + " (saved with the datasource)")
+    p.add_argument("--pii-columns", default=None, help=PII_HELP)
     p.add_argument("--no-scan", action="store_true")
     p.set_defaults(func=cmd_add)
 
@@ -230,6 +238,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("name")
     p.add_argument("--no-profile", action="store_true")
     p.add_argument("--tables", default=None, help=TABLES_HELP + " (this scan only)")
+    p.add_argument("--pii-columns", default=None, help=PII_HELP)
     p.set_defaults(func=cmd_scan)
 
     p = sub.add_parser("list", help="show datasources and readiness")

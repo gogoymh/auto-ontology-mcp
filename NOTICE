@@ -13,8 +13,12 @@ The following parts are adapted from Auto Ontology source files:
   semantic/semantic_fk.py, semantic/sql_attribute_suggester.py,
   retrieval/entity_coverage/prompts.py, retrieval/text_to_sql/prompts.py and
   skills/nvidia-ontology-query/references/query-validation.md.
-- Column profiling and date format inference (src/auto_ontology_mcp/profiling.py),
-  from semantic/visit_enter.py and semantic/date_format.py.
+- Column profiling, date format inference and withholding the values of
+  PII-tagged columns (src/auto_ontology_mcp/profiling.py), from
+  semantic/visit_enter.py and semantic/date_format.py.
+- Foreign key candidates and their value-containment probe
+  (src/auto_ontology_mcp/inference.py), following semantic/fk_suggester.py and
+  semantic/semantic_fk.py.
 - Expression mining for SQL attribute suggestions
   (src/auto_ontology_mcp/sqlcheck.py: extract_expressions), from
   semantic/sql_attribute_suggester.py.

@@ -30,6 +30,16 @@ def _commit(repo: Path, path: str, msg: str) -> str:
     return _git(repo, "rev-parse", "HEAD")
 
 
+def test_notice_lists_every_ported_file():
+    notice = " ".join((ROOT / "NOTICE").read_text().split())
+    state = json.loads((ROOT / "scripts" / "upstream_state.json").read_text())
+    for f in scout.local_files(state):
+        assert f"src/auto_ontology_mcp/{f}" in notice, f
+    for path in state["ported"]:
+        assert path.removeprefix("auto_ontology/").rstrip("/") in notice, path
+    assert "src/auto_ontology_mcp/inference.py" in notice
+
+
 @pytest.fixture
 def upstream(tmp_path, monkeypatch):
     repo = tmp_path / "auto-ontology"
