@@ -54,6 +54,23 @@ async def test_datasource_tools_can_be_disabled(settings, svc):
     assert "add_datasource" not in names and "scan_datasource" not in names
 
 
+@pytest.mark.parametrize("enabled", [True, False], ids=["semantic_on", "semantic_off"])
+async def test_instructions_follow_semantic_status(settings, svc, monkeypatch, enabled):
+    status = {"enabled": True, "model": "stub", "backend": "sqlite-blob"} if enabled else {"enabled": False, "reason": "off"}
+    monkeypatch.setattr(svc, "semantic_status", lambda: status)
+    mcp = build_server(settings, svc)
+    async with Client(mcp) as client:
+        handshake = client.instructions
+        guide = (await client.read_resource("ontology://guide"))[0].text
+    for text in (handshake, guide):
+        if enabled:
+            assert "Search is hybrid" in text and "lexical, not semantic" not in text
+            assert "translate entity phrases" not in text
+        else:
+            assert "Search is lexical, not semantic" in text and "Search is hybrid" not in text
+            assert "translate entity phrases" in text
+
+
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))

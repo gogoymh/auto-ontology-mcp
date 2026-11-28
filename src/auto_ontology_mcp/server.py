@@ -157,9 +157,12 @@ TOOL_GROUPS: dict[str, str] = {
 def build_server(settings: Settings | None = None, service: OntologyService | None = None) -> FastMCP:
     settings = settings or Settings.from_env()
     svc = service or OntologyService(settings)
+    semantic_on = bool(svc.semantic_status().get("enabled"))
+    instructions = guidance.server_instructions(settings.toolsets, semantic=semantic_on)
+    logger.info("server instructions: search guidance=%s", "hybrid" if semantic_on else "lexical")
     mcp = FastMCP(
         name="auto-ontology",
-        instructions=guidance.server_instructions(settings.toolsets),
+        instructions=instructions,
         version=__version__,
         website_url="https://github.com/gogoymh/auto-ontology-mcp",
     )
@@ -657,7 +660,7 @@ def build_server(settings: Settings | None = None, service: OntologyService | No
         return "\n\n".join(
             [
                 "# Auto Ontology MCP",
-                guidance.SERVER_INSTRUCTIONS,
+                instructions,
                 "## Modeling rules\n" + guidance.TERM_RULES,
                 "## Relationship review\n" + guidance.RELATIONSHIP_RULES,
                 "## SQL attributes\n" + guidance.SQL_ATTRIBUTE_RULES,
