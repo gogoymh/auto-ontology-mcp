@@ -31,8 +31,8 @@ from .inference import names_own_table
 from .knowledge import KNOWLEDGE_DS, SOURCES_TABLE, Knowledge, is_builtin
 from .naming import clean_label, compact, id_base, to_label
 from .profiling import is_numeric_type
-from .search import KINDS as SEARCH_DOC_KINDS, Doc, build_docs, doc_text, search
-from .semantic import VectorIndex, content_hash
+from .search import KINDS as SEARCH_DOC_KINDS, NAME_SUFFIX, Doc, build_docs, doc_text, name_text, search
+from .semantic import ONTOLOGY_MIN_SEMANTIC, VectorIndex, content_hash
 from .sqlcheck import SqlGuardError, analyze, extract_expressions, first_statement, guard_readonly, guard_sources, normalize_sql
 from .store import Store, new_id, now
 from .validation import Validator, limited, qtable
@@ -1211,6 +1211,12 @@ class OntologyService:
                 continue
             by_kind.setdefault(doc.kind, {})[doc.id] = text
             digest_parts.append(f"{doc.kind}:{doc.id}:{content_hash(text)}")
+            name = name_text(doc)
+            if name:
+                # A second vector of the bare name: short queries ("매출", "turnover") sit
+                # close to "Revenue" but far from the full text with its samples and SQL.
+                by_kind[doc.kind][doc.id + NAME_SUFFIX] = name
+                digest_parts.append(f"{doc.kind}:{doc.id}{NAME_SUFFIX}:{content_hash(name)}")
         digest = content_hash("\n".join(sorted(digest_parts)))
         cache_key = (self.vectors.model_name, digest)
         if self._synced_ontology_digest.get(ds["id"]) == cache_key and self.vectors.path.exists():
@@ -1229,7 +1235,7 @@ class OntologyService:
         limit: int = 10,
         docs=None,
         *,
-        min_semantic: float = 0.52,
+        min_semantic: float = ONTOLOGY_MIN_SEMANTIC,
     ) -> list[dict[str, Any]]:
         doc_list = docs if docs is not None else self._docs(ds)
         if not self.vectors.is_available():
@@ -1243,7 +1249,12 @@ class OntologyService:
             limit=max(limit * 3, 25),
             min_similarity=min_semantic,
         )
-        sem_scores = {(h.kind, h.item_id): h.similarity for h in vec_hits}
+        # A document scores the better of its full-text and name vectors.
+        sem_scores: dict[tuple[str, str], float] = {}
+        for h in vec_hits:
+            key = (h.kind, h.item_id.removesuffix(NAME_SUFFIX))
+            if h.similarity > sem_scores.get(key, -1.0):
+                sem_scores[key] = h.similarity
         return search(query, doc_list, kinds=kinds, limit=limit, semantic_scores=sem_scores, min_semantic=min_semantic)
 
     def search_ontology(self, query: str, kinds: list[str] | None = None, limit: int = 10, datasource: str | None = None) -> dict[str, Any]:
