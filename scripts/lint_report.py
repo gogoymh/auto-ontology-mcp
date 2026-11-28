@@ -16,8 +16,9 @@ TRANSLATIONESE = [
     # 기준선 대비, 한계가 있습니다: phrases lifted from English (compared to, has a limitation)
     r"(?<![가-힣])대비(?![가-힣])", r"한계가 있",
 ]
-# 반영했다 and 확보했다 say something changed without saying what; 반영돼 있다 (already in) stays allowed
-NOMINAL = [r"구축", r"연동", r"등록되었", r"반영(했|합니|한다)", r"확보(했|합니|한다)"]
+# 반영했다 and 확보했다 say something changed without saying what; 반영돼 있다 (already in) stays allowed,
+# and so does 반영했는지 (asking whether a commit was taken in)
+NOMINAL = [r"구축", r"연동", r"등록되었", r"반영(했|합니|한다)(?!는지)", r"확보(했|합니|한다)(?!는지)"]
 # 시 after a noun of two or more syllables (검토 시, 배포 시). Not 3시, 시간, 다시, 표시.
 NOUNSTACK = [
     r"향후",
@@ -107,7 +108,8 @@ def sentences(text: str) -> list[str]:
     for p in (p.strip() for p in out):
         if not p:
             continue
-        if parts and p.startswith("("):  # '마쳤습니다 (작업: …).' keeps its note in the same sentence
+        # '마쳤습니다 (작업: …).' keeps its note in the same sentence; a note after a full stop, '봅니다. (-10)', stands alone
+        if parts and p.startswith("(") and not re.search(r"[.!?]$", parts[-1]):
             parts[-1] += " " + p
         else:
             parts.append(p)
@@ -118,19 +120,29 @@ def sentences(text: str) -> list[str]:
 # fenced code blocks, blockquote lines (>) and spans in quotes. Inline code stays (crammed counts its paths).
 _FENCE = re.compile(r"^[ \t]*(```|~~~)[^\n]*\n.*?(?:^[ \t]*\1[^\n]*$|\Z)", re.M | re.S)
 _QUOTE_LINE = re.compile(r"^[ \t]*>.*$", re.M)
-# inline code first so quote marks inside it are kept; ' opens only after a non-letter (not don't)
+# inline code first so quote marks inside it are kept; ' opens only after a non-letter (not don't).
+# ``…`` before `…`, so a span that itself holds backticks stays one span.
 _QUOTED = re.compile(
-    r"(`[^`\n]*`)"
+    r"(``[^\n]*?``|`[^`\n]*`)"
     r"|\"[^\"\n]+\"|“[^”\n]+”|‘[^’\n]+’|「[^」\n]+」|『[^』\n]+』"
     r"|(?<![A-Za-z0-9])'[^'\n]+'(?![A-Za-z0-9])"
 )
+
+
+# inline code that holds a whole Korean sentence ('`…저장했습니다.`') quotes an example, so it is masked too
+_CODE_SENTENCE = re.compile(r"[가-힣](?:다|요)[.!?]?\s*`+$")
+
+
+def _masked(m: re.Match) -> str:
+    code = m.group(1)
+    return code if code and not _CODE_SENTENCE.search(code) else "'…'"
 
 
 def mask(text: str) -> str:
     """Drop code blocks and blockquote lines, and blank quoted spans to '…'."""
     text = _FENCE.sub("", text)
     text = _QUOTE_LINE.sub("", text)
-    return _QUOTED.sub(lambda m: m.group(1) or "'…'", text)
+    return _QUOTED.sub(_masked, text)
 
 
 def has_quantity(s: str) -> bool:
@@ -174,10 +186,11 @@ def lint(text: str) -> list[tuple[str, str]]:
                     found.append((kind, m.group(0)))
         if "·" in plain:
             found.append(("middot", plain[max(0, plain.find("·") - 6) : plain.find("·") + 6]))
-        # 을(를), 이(가), (으)로 hint a particle; a lone syllable in parentheses explains nothing
-        parens = [p for p in re.findall(r"\(([^)]*)\)", s) if not re.fullmatch(r"[가-힣]", p)]
+        # 을(를), 이(가), (으)로 hint a particle and (>) names a symbol; one character in parentheses explains nothing
+        parens = [p for p in re.findall(r"\(([^)]*)\)", s) if not re.fullmatch(r"\S", p)]
         paren_hit = len(parens) >= 3 or (len(parens) >= 2 and any(re.search(FILE, p) for p in parens))
-        files = len(re.findall(FILE, s))
+        # the same file named twice (SKILL.md, SKILL.md:3) is one file
+        files = len({m.group(0).rsplit("/", 1)[-1] for m in re.finditer(FILE, s)})
         file_hit = (files >= 3 and has_quantity(s) and _CRAM_ACT.search(s)) or (files >= 2 and quantities(s) >= 3)
         if paren_hit or file_hit:
             found.append(("crammed", s[:60]))

@@ -328,3 +328,36 @@ def test_particle_parens_are_not_crammed(text: str) -> None:
 def test_particle_parens_keep_real_crammed(text: str) -> None:
     code, kinds = _kinds(text)
     assert code == 1 and "crammed" in kinds, (text, kinds)
+
+
+# AOM-58: false positives found in grading documents and issue bodies; the true findings next to them stay.
+@pytest.mark.parametrize(
+    "text",
+    [
+        "통과시킵니다(`scripts/lint_report.py:55-57`이 괄호 개수만 봅니다). (-10)",
+        "인용문(>) 안에 있는 표현은 빼고, 고친 예를 윤문 스킬(.claude/skills/polish/SKILL.md)에 더합니다.",
+        "`.claude/skills/polish/SKILL.md`의 번호 패턴은 7개이고 설명(`SKILL.md:3`)도 패턴 1~7과 5~7개 제한을 적습니다.",
+        "`benchmarks/a.py와 benchmarks/b.py와 benchmarks/c.py의 주요 3개 파일을 저장했습니다.`도 놓칩니다.",
+        "원문(`` `a.py`, `b.py`, `c.py` 세 파일을 고쳐 테스트 28개를 통과시키고 점수를 0.84로 올렸습니다. ``)은 통과합니다.",
+        "옮겨 온 파일마다 원본의 어느 커밋까지 반영했는지 기록하기",
+    ],
+)
+def test_corpus_fp_clean(text: str) -> None:
+    code, kinds = _kinds(text)
+    assert code == 0, (text, kinds)
+
+
+@pytest.mark.parametrize(
+    ("text", "kind"),
+    [
+        ("`a.py` 3개와 `b.py` 4개(합계 7개), `c.py` 10개 항목이 통과합니다.", "crammed"),
+        ("검색(어휘)과 점수(결합)와 색인(증분)을 바꿨습니다. (-3)", "crammed"),
+        ("a.py와 b.py와 c.py에 테스트 5개를 더했습니다.", "crammed"),
+        ("`a.py`, `b.py`, `c.py`에 테스트 5개를 더했습니다.", "crammed"),
+        ("결과를 문서에 반영했습니다.", "nominal"),
+        ("작업을 마쳤습니다 (작업: 빈 보고).", "empty"),
+    ],
+)
+def test_corpus_fp_still_flagged(text: str, kind: str) -> None:
+    code, kinds = _kinds(text)
+    assert code == 1 and kind in kinds, (text, kinds)
