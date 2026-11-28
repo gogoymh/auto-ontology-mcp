@@ -1,6 +1,6 @@
 ---
 name: polish
-description: Rewrite text an agent wrote for people (channel messages, mission reasons, completion reports, issue titles and bodies, docs, UI copy) so it reads like a person wrote it, without changing its meaning. Use before posting any Korean message or report (run the pre-report check in this skill before mission_finish, issue review comments, issue titles and bodies, channel posts and doc_write), and when reviewing agent text for translationese, crammed lists, English reports in Korean channels, long chained sentences, noun stacks, self-ratings, or reports that only say the work finished. Keep the numbered patterns between five and seven.
+description: Rewrite text an agent wrote for people (channel messages, mission reasons, completion reports, issue titles and bodies, docs, UI copy) so it reads like a person wrote it, without changing its meaning. Use before posting any Korean message or report (run the pre-report check in this skill before mission_finish, issue review comments, issue titles and bodies, channel posts, doc_write and doc_comment), and when reviewing agent text for translationese, crammed lists, English reports in Korean channels, long chained sentences, noun stacks, self-ratings, or reports that only say the work finished. Keep the numbered patterns between five and seven.
 ---
 
 # polish
@@ -192,7 +192,7 @@ description: Rewrite text an agent wrote for people (channel messages, mission r
 3. 상태 0(`ok: no polish patterns found`)이 나올 때까지 1과 2를 되풀이한다.
 4. 고치기 전과 뒤의 수치, 파일 이름, 티켓 번호, 명령이 같은지 대조한 뒤 올린다.
 
-다섯 도구는 훅이 대신 점검한다. `.claude/settings.json`에 건 `scripts/polish_hook.py`가 mission_finish의 summary와 next, issue_update의 comment와 title과 body, message_post의 text, issue_create의 title과 body, doc_write의 text에서 패턴을 찾으면 호출을 막고, 찾은 줄과 그 패턴의 고친 예를 보여 준다. 예처럼 문장만 고쳐 다시 부른다.
+여섯 도구는 훅이 대신 점검한다. `.claude/settings.json`에 건 `scripts/polish_hook.py`가 mission_finish의 summary와 next, issue_update의 comment와 title과 body, message_post의 text, issue_create의 title과 body, doc_write의 text, doc_comment의 text에서 패턴을 찾으면 호출을 막고, 찾은 줄과 그 패턴의 고친 예를 보여 준다. 예처럼 문장만 고쳐 다시 부른다.
 
 스크립트는 패턴을 찾을 뿐 고치지 않는다. 일부러 남긴 표현이라 판단하면 그대로 올려도 되지만, 그 줄이 왜 괜찮은지 스스로 설명할 수 있어야 한다.
 

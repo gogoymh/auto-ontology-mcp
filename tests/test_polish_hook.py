@@ -142,6 +142,26 @@ def test_passes_clean_doc_write() -> None:
     assert _run("mcp__cua__doc_write", {"name": "정리", "text": text}).returncode == 0
 
 
+def test_blocks_doc_comment_text() -> None:
+    for tool in ("mcp__cua__doc_comment", "mcp__preconquer__doc_comment"):
+        res = _run(tool, {"name": "doc:3f9a2c", "id": "c1", "text": DIRTY})
+        assert res.returncode == 2, res.stderr
+        assert "문서 댓글" in res.stderr and "doc_comment" in res.stderr and "[text]" in res.stderr
+        assert "translationese: " in res.stderr and "고친 뒤:" in res.stderr
+
+
+def test_blocks_doc_comment_bare_done() -> None:
+    res = _run("mcp__cua__doc_comment", {"name": "정리", "id": "c1", "text": "반영을 마쳤습니다."})
+    assert res.returncode == 2 and "empty: " in res.stderr, res.stderr
+
+
+def test_passes_doc_comment_clean_resolve_and_quote() -> None:
+    assert _run("mcp__cua__doc_comment", {"name": "정리", "id": "c1", "text": CLEAN}).returncode == 0
+    assert _run("mcp__preconquer__doc_comment", {"name": "정리", "id": "c1", "resolve": True}).returncode == 0
+    res = _run("mcp__cua__doc_comment", {"name": "정리", "quote": DIRTY, "text": "이 문장은 숫자를 붙여 다시 씁니다."})
+    assert res.returncode == 0, res.stderr
+
+
 def test_passes_other_tools_and_bad_input() -> None:
     assert _run("mcp__cua__issue_get", {"text": DIRTY}).returncode == 0
     res = subprocess.run([sys.executable, str(HOOK)], input="not json", capture_output=True, text=True, timeout=10)
@@ -156,7 +176,8 @@ def test_every_kind_has_skill_example(kind: str) -> None:
 
 @pytest.mark.parametrize(
     "tool",
-    ["mcp__cua__mission_finish", "mcp__cua__issue_update", "mcp__cua__message_post", "mcp__cua__issue_create", "mcp__cua__doc_write"],
+    ["mcp__cua__mission_finish", "mcp__cua__issue_update", "mcp__cua__message_post", "mcp__cua__issue_create", "mcp__cua__doc_write", "mcp__cua__doc_comment",
+     "mcp__preconquer__doc_comment", "mcp__preconquer__mission_finish"],
 )
 def test_settings_registers_hook(tool: str) -> None:
     cfg = json.loads((ROOT / ".claude/settings.json").read_text(encoding="utf-8"))
@@ -164,3 +185,4 @@ def test_settings_registers_hook(tool: str) -> None:
     assert entries, f"no PreToolUse entry matches {tool}"
     assert any("scripts/polish_hook.py" in h["command"] for e in entries for h in e["hooks"])
     assert not re.fullmatch(entries[0]["matcher"], "mcp__cua__issue_get")
+    assert not re.fullmatch(entries[0]["matcher"], "mcp__preconquer__doc_read")
