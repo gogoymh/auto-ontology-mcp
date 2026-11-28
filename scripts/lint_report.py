@@ -148,7 +148,8 @@ def lint(text: str) -> list[tuple[str, str]]:
                     found.append((kind, m.group(0)))
         if "·" in plain:
             found.append(("middot", plain[max(0, plain.find("·") - 6) : plain.find("·") + 6]))
-        parens = re.findall(r"\(([^)]*)\)", s)
+        # 을(를), 이(가), (으)로 hint a particle; a lone syllable in parentheses explains nothing
+        parens = [p for p in re.findall(r"\(([^)]*)\)", s) if not re.fullmatch(r"[가-힣]", p)]
         paren_hit = len(parens) >= 3 or (len(parens) >= 2 and any(re.search(FILE, p) for p in parens))
         file_hit = len(re.findall(FILE, s)) >= 3 and has_quantity(s) and _CRAM_ACT.search(s)
         if paren_hit or file_hit:
