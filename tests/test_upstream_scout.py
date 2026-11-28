@@ -103,3 +103,69 @@ def test_classify_follows_notice():
     state = json.loads((ROOT / "scripts" / "upstream_state.json").read_text())
     assert state["remote"] == "https://github.com/NVIDIA/auto-ontology"
     assert len(state["reviewed"]) == 40
+
+
+def test_state_records_synced_commit_per_ported_path():
+    state = json.loads((ROOT / "scripts" / "upstream_state.json").read_text())
+    ported = state["ported"]
+    assert scout.PORTED == [(p, e["local"]) for p, e in ported.items()]
+    assert {"guidance.py", "profiling.py"} <= set(scout.local_files(state))
+    for path, entry in ported.items():
+        assert len(entry["synced"]) == 40 and int(entry["synced"], 16) >= 0, path
+        assert entry["local"] and all(f.endswith(".py") for f in entry["local"]), path
+        for f in entry["local"]:
+            assert (ROOT / "src" / "auto_ontology_mcp" / f).exists(), f
+
+
+@pytest.fixture
+def ported(upstream):
+    """Upstream with one adapted file, synced at its second commit."""
+    repo, state, _ = upstream
+    _commit(repo, "auto_ontology/semantic/term_extractor.py", "old rule already ported")
+    synced = _commit(repo, "auto_ontology/semantic/visit_enter.py", "probe already ported")
+    s = json.loads(state.read_text())
+    s["ported"] = {
+        "auto_ontology/semantic/term_extractor.py": {"local": ["guidance.py"], "synced": synced},
+        "auto_ontology/semantic/visit_enter.py": {"local": ["profiling.py"], "synced": synced},
+    }
+    state.write_text(json.dumps(s))
+    return repo, state, synced
+
+
+def test_diff_shows_only_changes_after_synced(ported, capsys):
+    repo, state, synced = ported
+    assert scout.main(["--state", str(state), "--diff", "src/auto_ontology_mcp/guidance.py"]) == 0
+    out = capsys.readouterr().out
+    assert "0 new commits" in out and "Up to date." in out and "old rule" not in out
+
+    _commit(repo, "auto_ontology/semantic/term_extractor.py", "new naming rule")
+    _commit(repo, "auto_ontology/semantic/visit_enter.py", "profiling change")
+    assert scout.main(["--state", str(state), "--diff", "guidance.py"]) == 0
+    out = capsys.readouterr().out
+    assert "## auto_ontology/semantic/term_extractor.py" in out
+    assert f"Synced {synced[:12]}" in out and "1 new commit." in out
+    assert "+new naming rule" in out and "new naming rule" in out.split("```diff")[0]
+    assert "+old rule" not in out
+    assert "visit_enter" not in out and "profiling change" not in out
+
+
+def test_diff_rejects_unported_file(ported, caplog):
+    _, state, _ = ported
+    assert scout.main(["--state", str(state), "--diff", "server.py"]) == 2
+    assert "server.py has no ported upstream code" in caplog.text
+    assert "guidance.py, profiling.py" in caplog.text
+
+
+def test_mark_synced_moves_only_that_file(ported, capsys):
+    repo, state, synced = ported
+    _commit(repo, "auto_ontology/semantic/term_extractor.py", "new naming rule")
+    head = _commit(repo, "auto_ontology/semantic/visit_enter.py", "profiling change")
+    assert scout.main(["--state", str(state), "--mark-synced", "guidance.py"]) == 0
+    saved = json.loads(state.read_text())["ported"]
+    assert saved["auto_ontology/semantic/term_extractor.py"]["synced"] == head
+    assert saved["auto_ontology/semantic/visit_enter.py"]["synced"] == synced
+    capsys.readouterr()
+    assert scout.main(["--state", str(state), "--diff", "guidance.py"]) == 0
+    assert "Up to date." in capsys.readouterr().out
+    assert scout.main(["--state", str(state), "--diff", "profiling.py"]) == 0
+    assert "+profiling change" in capsys.readouterr().out
