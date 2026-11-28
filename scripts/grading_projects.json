@@ -1,0 +1,91 @@
+{
+  "auto-ontology-mcp": {
+    "hub": "~/.preconquer/hub/auto-ontology-mcp-6805a3ce",
+    "notes": {
+      "AOM-28 채점": [
+        "AOM-28"
+      ],
+      "AOM-25 채점": [
+        "AOM-25"
+      ],
+      "AOM-20, AOM-21, AOM-22 채점": [
+        "AOM-20",
+        "AOM-21",
+        "AOM-22"
+      ],
+      "AOM-19 채점- AOM-13, AOM-5, AOM-14, AOM-17": [
+        "AOM-5",
+        "AOM-13",
+        "AOM-14",
+        "AOM-17"
+      ]
+    },
+    "before": {
+      "AOM-28 채점": "f53578278305f2c807f16f8c7169482a08cfa1767b48ca55d7374a4f8993bb10",
+      "AOM-25 채점": "308de6b802bc6477ddd9459b816299a565e4a87f4d2fbab4697769674e9d76d6",
+      "AOM-20, AOM-21, AOM-22 채점": "32acc02547ca44defd1ef132293b1c95afb7f4ed62bf9ea13a226507d8bb7d24",
+      "AOM-19 채점- AOM-13, AOM-5, AOM-14, AOM-17": "e7abf3c6e9c3be2910eee4412b0a17ea521378a40cb268575f65033e64b69ed3"
+    }
+  },
+  "d-means": {
+    "hub": "~/.preconquer/hub/d-means-26bce00f",
+    "backup": "docs-backup-2026-11-28",
+    "notes": {
+      "DM-22와 DM-25 채점 결과": [
+        "DM-22",
+        "DM-25"
+      ],
+      "DM-28 채점 결과": [
+        "DM-28"
+      ],
+      "DM-30 채점 결과": [
+        "DM-30"
+      ],
+      "DM-32 채점 결과": [
+        "DM-32"
+      ]
+    },
+    "before": {
+      "d-means 조사와 벤치마크 결과": "1eb66d88aa15e02c46951d5e1c40ef088392b2dd85f049cd9ce39c803bac45e3",
+      "d-means 의사결정 모델 3종 벤치마크": "9169cdf80474fa7b463aa5e1fa8db43f4fae6c88645db643fe8eac060091763e",
+      "DM-22와 DM-25 채점 결과": "200c27b1c01476cd74e5fbfb5a5ab45fb8509684fabeb5b6db2c4aee5c816af1",
+      "DM-28 채점 결과": "42753835419260ba11ad6e64a14586e01a84c0364af1fa7253477316c11f6474",
+      "DM-30 채점 결과": "b76082a671a71402981ab098a94d752d4e0e5cb4c1f70af19a3631554a76879b",
+      "DM-32 채점 결과": "7e9b857b08a1fdd177857521c1c6d4f7dd915160a01b970581f5637f1d373c16"
+    },
+    "tree_before": "887eeef1736469af7fc297bb75037c79b359ce6ff6667a4a39a8971668c9dddc"
+  },
+  "git-ontology-agent": {
+    "hub": "~/.preconquer/hub/git-ontology-agent-ba60dcde",
+    "backup": "docs-backup-2026-11-28",
+    "old_folder": "미션 채점 기록",
+    "notes": {
+      "GOA-18 채점": [
+        "GOA-18"
+      ],
+      "GOA-22 채점 다섯 미션": [
+        "GOA-11",
+        "GOA-14",
+        "GOA-15",
+        "GOA-17",
+        "GOA-20"
+      ],
+      "GOA-23 채점- 76점": [
+        "GOA-23"
+      ],
+      "GOA-28과 GOA-35 채점": [
+        "GOA-28",
+        "GOA-35"
+      ]
+    },
+    "before": {
+      "미션 채점 기록": "eb64eb6ffebad4c11e9869d739685faffe51640c77c8a64a77fc1b15e5330589",
+      "GOA 성능 벤치마크 가이드와 초기 기준 점수": "861a1c3071eb8853afdd6a7a770502c8acdb0b9edd17a7ef6902439d2a1802cd",
+      "GOA-18 채점": "ba73d7d96fee199c335e371f5d683bfa5925f9c70f7113eda65e272bdad7034e",
+      "GOA-22 채점 다섯 미션": "e25598522e9c4cd0cc3df901e83feeb385297dc11a2b04af34c0777248b55eae",
+      "GOA-23 채점- 76점": "fceab55e151734cc7b839a365e0a5fc73dd107e44779e587ae0a12d2e1c29652",
+      "GOA-28과 GOA-35 채점": "a5903c2f00a8d63a66bf007b1072597e6a9a320973590747576f399beadd8a04"
+    },
+    "tree_before": "f2cc1b2f9ec7f95bc90193c813b6f6015950912119e8d7b194515d4c4bee1ae0"
+  }
+}
