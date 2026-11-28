@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_MIN_SIMILARITY = 0.50
 RRF_K = 60
+# Ontology vector hits below this cosine leave the lexical score alone. Bare metric names
+# sit just above it for short synonyms ("turnover" -> "Revenue" 0.517 with the default
+# model), while unrelated queries stay under 0.36.
+ONTOLOGY_MIN_SEMANTIC = 0.50
 
 _MODEL_LOCK = threading.Lock()
 _MODEL_CACHE: dict[tuple[str, str | None], Any] = {}
@@ -119,7 +123,7 @@ def blend_ontology_score(
     lexical_score: float,
     semantic_score: float | None,
     *,
-    min_semantic: float = 0.52,
+    min_semantic: float = ONTOLOGY_MIN_SEMANTIC,
     semantic_only_scale: float = 0.85,
     boost_weight: float = 0.35,
 ) -> float:

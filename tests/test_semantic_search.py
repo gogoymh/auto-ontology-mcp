@@ -12,7 +12,7 @@ import pytest
 
 from auto_ontology_mcp import semantic
 from auto_ontology_mcp.config import Settings
-from auto_ontology_mcp.search import Doc, search as ontology_search
+from auto_ontology_mcp.search import NAME_SUFFIX, Doc, name_text, search as ontology_search
 from auto_ontology_mcp.semantic import (
     VectorIndex,
     blend_ontology_score,
@@ -505,3 +505,47 @@ def test_hybrid_search_reuses_cached_revision_docs(settings, tmp_path, monkeypat
     assert texts == ["t1"]
     svc._sync_ontology_vectors(ds, list(docs))
     assert texts == ["t1", "t1"]
+
+
+def test_name_text_is_bare_name_and_term_synonyms():
+    term = Doc("term", "t1", "Revenue", [("Revenue", 1.0), ("Turnover Sales", 0.95), ("order_lines", 0.6)])
+    attr = Doc("attribute", "a1", "Order Line › Revenue", [("Revenue", 0.9), ("line_total", 0.75), ("237.0 79.0", 0.35)])
+    example = Doc("example", "e1", "Revenue by month", [("Revenue by month", 0.9), ("monthly", 0.4)])
+    bare = Doc("glossary", "g1", "GMV", [("GMV", 1.0)])
+    assert name_text(term) == "Revenue\nTurnover Sales"
+    assert name_text(attr) == "Revenue"
+    # Long-text kinds get no name vector; a name that is the whole document needs no second one.
+    assert name_text(example) == ""
+    assert name_text(bare) == ""
+
+
+class NameEmbedder:
+    """Puts the bare word "Revenue" and the query "turnover" on one axis, everything else on another."""
+
+    model_name = "fake-name-v1"
+
+    def _encode(self, text: str) -> list[float]:
+        return [1.0, 0.0] if text.strip().casefold() in ("revenue", "turnover") else [0.0, 1.0]
+
+    def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
+        return [self._encode(t) for t in texts]
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._encode(text)
+
+
+def test_hybrid_search_finds_metric_by_its_name_vector(settings, tmp_path):
+    # The full text mixes the name with column names and samples, which the embedder
+    # puts far from the query; the name-only vector still finds the attribute.
+    svc = OntologyService(settings)
+    svc.vectors = VectorIndex(tmp_path / "n.vectors.sqlite", enabled=True, embedder=NameEmbedder(), use_sqlite_vec=False)
+    ds = {"id": "ds-name", "name": "shop"}
+    docs = [
+        Doc("attribute", "a1", "Order Line › Revenue", [("Revenue", 0.9), ("line_total", 0.75), ("237.0 79.0", 0.35)]),
+        Doc("attribute", "a2", "Order › Status", [("Status", 0.9), ("status", 0.75), ("Delivered Shipped", 0.35)]),
+    ]
+    hits = svc._search(ds, "turnover", docs=docs)
+    assert [h["id"] for h in hits] == ["a1"]
+    assert hits[0]["match"] == "semantic"
+    assert hits[0]["semantic_score"] == 1.0
+    assert not any(h["id"].endswith(NAME_SUFFIX) for h in hits)

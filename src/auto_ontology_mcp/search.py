@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .naming import QUESTION_WORDS, normalize_text, tokens, trigram_similarity
-from .semantic import blend_ontology_score
+from .semantic import ONTOLOGY_MIN_SEMANTIC, blend_ontology_score
 
 KINDS = ("term", "attribute", "sql_attribute", "glossary", "table", "example", "source")
 
@@ -194,6 +194,29 @@ def doc_text(doc: Doc, max_chars: int = 2000) -> str:
     return joined[:max_chars] if len(joined) > max_chars else joined
 
 
+# How many leading fields of a Doc hold its name: a Term's name and its synonyms, else the
+# name alone. Kinds left out (examples, sources) are long texts with no short name worth
+# a vector of its own.
+NAME_FIELDS = {"term": 2, "attribute": 1, "sql_attribute": 1, "glossary": 1, "table": 1}
+NAME_SUFFIX = "#name"
+
+
+def name_text(doc: Doc) -> str:
+    """The Doc's bare name (and a Term's synonyms) for a second, name-only vector.
+
+    The full ``doc_text`` mixes the name with sample values, SQL and column names, which
+    pulls a short query such as "turnover" or "매출" far from it: "Order Line › Revenue" with
+    its samples scores 0.37 for "매출", the word "Revenue" alone 0.70. Returns "" when the
+    kind has no name vector or the name is all the document holds (the full vector covers it).
+    """
+    count = NAME_FIELDS.get(doc.kind)
+    if not count:
+        return ""
+    parts = list(dict.fromkeys(t.strip() for t, _ in doc.fields[:count] if t and t.strip()))
+    text = "\n".join(parts)
+    return "" if not text or text.casefold() == doc_text(doc).casefold() else text
+
+
 def search(
     query: str,
     docs: list[Doc],
@@ -202,7 +225,7 @@ def search(
     min_score: float = 0.2,
     *,
     semantic_scores: dict[tuple[str, str], float] | None = None,
-    min_semantic: float = 0.52,
+    min_semantic: float = ONTOLOGY_MIN_SEMANTIC,
 ) -> list[dict[str, Any]]:
     wanted = set(kinds or KINDS)
     hits = []
