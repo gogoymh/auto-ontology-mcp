@@ -9,7 +9,6 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-import pytest
 import yaml
 from fastmcp import Client
 
