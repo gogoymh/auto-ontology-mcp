@@ -7,6 +7,8 @@ The scout bot runs this to turn new upstream work into ticket candidates:
     python3 scripts/upstream_scout.py                 # markdown digest of upstream PRs since the last review
     python3 scripts/upstream_scout.py --json          # the same digest as JSON
     python3 scripts/upstream_scout.py --mark-reviewed # record the fetched upstream head as reviewed
+    python3 scripts/upstream_scout.py --diff guidance.py         # upstream changes not yet ported there
+    python3 scripts/upstream_scout.py --mark-synced guidance.py  # after porting them
 
 The last reviewed upstream commit lives in scripts/upstream_state.json, so it moves only when a
 scout mission that filed the tickets is merged. Upstream history is kept in a blobless bare clone
@@ -29,20 +31,13 @@ log = logging.getLogger("upstream_scout")
 STATE_FILE = Path(__file__).with_name("upstream_state.json")
 DEFAULT_REMOTE = "https://github.com/NVIDIA/auto-ontology"
 
-# Upstream files this project adapted (see NOTICE): a change there may need porting.
-PORTED: list[tuple[str, list[str]]] = [
-    ("auto_ontology/semantic/term_extractor.py", ["guidance.py"]),
-    ("auto_ontology/semantic/fk_suggester.py", ["guidance.py", "inference.py"]),
-    ("auto_ontology/semantic/semantic_fk.py", ["guidance.py", "inference.py"]),
-    ("auto_ontology/semantic/sql_attribute_suggester.py", ["guidance.py", "sqlcheck.py"]),
-    ("auto_ontology/retrieval/entity_coverage/prompts.py", ["guidance.py"]),
-    ("auto_ontology/retrieval/text_to_sql/prompts.py", ["guidance.py"]),
-    ("skills/nvidia-ontology-query/", ["guidance.py"]),
-    ("auto_ontology/semantic/visit_enter.py", ["profiling.py"]),
-    ("auto_ontology/semantic/date_format.py", ["profiling.py"]),
-    ("auto_ontology/retrieval/text_to_sql/db_probe/", ["validation.py", "structure.py"]),
-    ("auto_ontology/retrieval/text_to_sql/agents/sql_parse_validation.py", ["structure.py"]),
-]
+# Upstream files this project adapted (see NOTICE): a change there may need porting. Each entry in
+# upstream_state.json "ported" names the local files and the last upstream commit ported into them.
+def ported_table(state: dict) -> list[tuple[str, list[str]]]:
+    return [(path, entry["local"]) for path, entry in state.get("ported", {}).items()]
+
+
+PORTED: list[tuple[str, list[str]]] = ported_table(json.loads(STATE_FILE.read_text()))
 
 # Upstream areas with a counterpart here that was written independently: ideas may carry over.
 RELATED: list[tuple[str, list[str]]] = [
@@ -176,6 +171,36 @@ def render(d: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def ported_entries(state: dict, local: str) -> dict[str, dict]:
+    """Upstream paths adapted into one local file (given as a name or a path)."""
+    name = Path(local).name
+    return {p: e for p, e in state.get("ported", {}).items() if name in e["local"]}
+
+
+def local_files(state: dict) -> list[str]:
+    return sorted({f for e in state.get("ported", {}).values() for f in e["local"]})
+
+
+def file_diff(mirror: Path, entries: dict[str, dict], head: str, web: str) -> str:
+    """Markdown of the upstream commits and diff after each entry's synced commit."""
+    lines: list[str] = []
+    for path, entry in entries.items():
+        synced = entry["synced"]
+        log_out = git("log", "--format=%H%x1f%ad%x1f%s", "--date=short", f"{synced}..{head}", "--", path,
+                      cwd=mirror)
+        commits = [c.split("\x1f", 2) for c in log_out.splitlines() if c.strip()]
+        lines += [f"## {path}", "", f"Synced {synced[:12]}, upstream head {head[:12]}: "
+                  f"{len(commits)} new commit{'s' if len(commits) != 1 else ''}."]
+        if not commits:
+            lines += ["", "Up to date.", ""]
+            continue
+        lines += [f"Compare: {web}/compare/{synced[:12]}...{head[:12]}", ""]
+        lines += [f"- {date} [{sha[:8]}]({web}/commit/{sha}) {subject}" for sha, date, subject in commits]
+        patch = git("diff", synced, head, "--", path, cwd=mirror)
+        lines += ["", "```diff", patch.rstrip("\n"), "```", ""]
+    return "\n".join(lines)
+
+
 def web_url(remote: str) -> str:
     return remote.removesuffix(".git") if remote.startswith("http") else remote
 
@@ -190,12 +215,25 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--mark-reviewed", nargs="?", const="HEAD", metavar="SHA",
                       help="record SHA (default: the fetched upstream head) as reviewed")
     mode.add_argument("--json", action="store_true", help="print the digest as JSON")
+    mode.add_argument("--diff", metavar="FILE",
+                      help="show upstream changes after the commit last ported into a local FILE")
+    mode.add_argument("--mark-synced", metavar="FILE",
+                      help="record the upstream head (or --at SHA) as ported into a local FILE")
+    ap.add_argument("--at", metavar="SHA", help="upstream commit for --mark-synced (default: head)")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, stream=sys.stderr,
                         format="upstream_scout: %(message)s")
 
     state = load_state(args.state)
+    if "ported" in state:
+        global PORTED
+        PORTED = ported_table(state)
+    target = args.diff or args.mark_synced
+    entries = ported_entries(state, target) if target else {}
+    if target and not entries:
+        log.error("%s has no ported upstream code; ported files: %s", target, ", ".join(local_files(state)))
+        return 2
     remote = args.remote or state["remote"]
     reviewed = state["reviewed"]
 
@@ -217,6 +255,20 @@ def main(argv: list[str] | None = None) -> int:
         state.update(reviewed=sha, reviewed_at=datetime.now(timezone.utc).strftime("%Y-%m-%d"))
         args.state.write_text(json.dumps(state, indent=2) + "\n")
         log.info("marked %s as reviewed in %s", sha[:12], args.state)
+        print(sha)
+        return 0
+
+    if args.diff:
+        log.info("%d upstream paths ported into %s", len(entries), Path(args.diff).name)
+        print(file_diff(mirror, entries, head, web_url(remote)), end="")
+        return 0
+    if args.mark_synced:
+        sha = git("rev-parse", args.at or head, cwd=mirror).strip()
+        for entry in entries.values():
+            entry["synced"] = sha
+        args.state.write_text(json.dumps(state, indent=2) + "\n")
+        log.info("marked %s as synced for %s (%d upstream paths)", sha[:12], Path(args.mark_synced).name,
+                 len(entries))
         print(sha)
         return 0
 

@@ -1,5 +1,77 @@
 {
   "remote": "https://github.com/NVIDIA/auto-ontology",
   "reviewed": "c4495670947eb7b4616f0dd9900e5ced2a48ca1e",
-  "reviewed_at": "2026-11-06"
+  "reviewed_at": "2026-11-06",
+  "ported": {
+    "auto_ontology/semantic/term_extractor.py": {
+      "local": [
+        "guidance.py"
+      ],
+      "synced": "732cdb9f360fc9bccdd06414fd9f3d964d40fc9e"
+    },
+    "auto_ontology/semantic/fk_suggester.py": {
+      "local": [
+        "guidance.py",
+        "inference.py"
+      ],
+      "synced": "732cdb9f360fc9bccdd06414fd9f3d964d40fc9e"
+    },
+    "auto_ontology/semantic/semantic_fk.py": {
+      "local": [
+        "guidance.py",
+        "inference.py"
+      ],
+      "synced": "fb496d406acfd34db0af3c5d188080097779021f"
+    },
+    "auto_ontology/semantic/sql_attribute_suggester.py": {
+      "local": [
+        "guidance.py",
+        "sqlcheck.py"
+      ],
+      "synced": "732cdb9f360fc9bccdd06414fd9f3d964d40fc9e"
+    },
+    "auto_ontology/retrieval/entity_coverage/prompts.py": {
+      "local": [
+        "guidance.py"
+      ],
+      "synced": "2fd2ea5e5c11ad2a1f0410f57ca7f219a7780a0c"
+    },
+    "auto_ontology/retrieval/text_to_sql/prompts.py": {
+      "local": [
+        "guidance.py"
+      ],
+      "synced": "b73ade466580386a9b5b29cb44cc4103a2c7b961"
+    },
+    "skills/nvidia-ontology-query/": {
+      "local": [
+        "guidance.py"
+      ],
+      "synced": "2bda7e4916696949daffa1c6c407a35892b66424"
+    },
+    "auto_ontology/semantic/visit_enter.py": {
+      "local": [
+        "profiling.py"
+      ],
+      "synced": "5bdbd4f6d946c2fb9d78e14603d5656aed430702"
+    },
+    "auto_ontology/semantic/date_format.py": {
+      "local": [
+        "profiling.py"
+      ],
+      "synced": "2fd2ea5e5c11ad2a1f0410f57ca7f219a7780a0c"
+    },
+    "auto_ontology/retrieval/text_to_sql/db_probe/": {
+      "local": [
+        "validation.py",
+        "structure.py"
+      ],
+      "synced": "2fd2ea5e5c11ad2a1f0410f57ca7f219a7780a0c"
+    },
+    "auto_ontology/retrieval/text_to_sql/agents/sql_parse_validation.py": {
+      "local": [
+        "structure.py"
+      ],
+      "synced": "98101384ed92d0ccbe208d189871091c65b3ba38"
+    }
+  }
 }
