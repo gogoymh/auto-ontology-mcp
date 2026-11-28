@@ -72,6 +72,8 @@ def test_headless_runner_measures_scores_and_latency(tmp_path: Path):
             "1",
             "--warmup",
             "0",
+            "--repeats",
+            "1",
             "--output",
             str(out_file),
             "--format",
@@ -105,7 +107,7 @@ def test_headless_runner_measures_scores_and_latency(tmp_path: Path):
 def test_baseline_file_is_valid_and_matches_current_run():
     assert BASELINE_PATH.is_file(), "benchmarks/baseline.json must exist"
     baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
-    assert baseline["schema_version"] == 1
+    assert baseline["schema_version"] == 2
     assert set(baseline["scores"]) == set(CORE_AREAS)
     assert baseline["overall_score"] >= 0.95
 
@@ -117,6 +119,8 @@ def test_baseline_file_is_valid_and_matches_current_run():
             "1",
             "--warmup",
             "0",
+            "--repeats",
+            "1",
             "--compare",
             str(BASELINE_PATH),
             "--format",
@@ -293,11 +297,11 @@ def test_semantic_benchmark_compares_lexical_and_hybrid_modes():
 def test_semantic_flag_reports_and_default_run_stays_lexical(monkeypatch, capsys):
     runner = _load_runner()
     monkeypatch.setattr(runner, "run_semantic_benchmark", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no extra")))
-    assert runner.main(["--semantic", "--iterations", "1", "--warmup", "0"]) == 2
+    assert runner.main(["--semantic", "--iterations", "1", "--warmup", "0", "--repeats", "1"]) == 2
     assert "no extra" in capsys.readouterr().err
 
     calls: list[dict] = []
     monkeypatch.setattr(runner, "run_semantic_benchmark", lambda *a, **k: calls.append(k))
-    assert runner.main(["--iterations", "1", "--warmup", "0", "--format", "json"]) == 0
+    assert runner.main(["--iterations", "1", "--warmup", "0", "--repeats", "1", "--format", "json"]) == 0
     out = json.loads(capsys.readouterr().out)
     assert "semantic_search" not in out and not calls

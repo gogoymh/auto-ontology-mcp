@@ -20,7 +20,7 @@ pytestmark = pytest.mark.skipif(not semantic_dependencies_available(), reason="s
 def test_cli_semantic_flag_measures_recall_gain_and_latency(tmp_path: Path):
     out_file = tmp_path / "semantic.json"
     proc = subprocess.run(
-        [sys.executable, str(SCRIPT_PATH), "--semantic", "--iterations", "1", "--warmup", "1",
+        [sys.executable, str(SCRIPT_PATH), "--semantic", "--iterations", "1", "--warmup", "1", "--repeats", "1",
          "--output", str(out_file), "--format", "json"],
         cwd=REPO_ROOT, capture_output=True, text=True, check=False,
     )
