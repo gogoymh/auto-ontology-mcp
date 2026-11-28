@@ -254,3 +254,52 @@ def test_skill_documents_quote_exclusion() -> None:
     for b, a in zip(before, after):
         assert _run(re.sub(r"^> ?", "", b, flags=re.M)).returncode == 1, b
         assert _run(re.sub(r"^> ?", "", a, flags=re.M)).returncode == 0, a
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "끝났습니다. 확인해 주세요.",
+        "작업 완료.",
+        "완료.",
+        "AOM-37 작업을 종료했습니다.",
+        "작업을 마무리 지었습니다. 잘 부탁드립니다.",
+        "리뷰를 마쳤습니다. 봐 주세요.",
+    ],
+)
+def test_empty_wider_variants_flagged(text: str) -> None:
+    code, kinds = _kinds(text)
+    assert code == 1 and "empty" in kinds, (text, kinds)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "테스트 5개 추가 완료.",
+        "작업을 종료했습니다. recall@3이 0.84로 올랐습니다.",
+        "미완료 항목을 정리했습니다.",
+        "확인해 주세요.",
+    ],
+)
+def test_empty_wider_variants_with_result_pass(text: str) -> None:
+    code, kinds = _kinds(text)
+    assert "empty" not in kinds, (text, kinds)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("로그를 남긴다 다음은 테스트입니다.", ["로그를 남긴다", "다음은 테스트입니다."]),
+        ("밥을 먹는다 그리고 잔다", ["밥을 먹는다", "그리고 잔다"]),
+        ("이제 돼요 다음을 봅니다.", ["이제 돼요", "다음을 봅니다."]),
+        ("빠르네요 다음을 봅니다.", ["빠르네요", "다음을 봅니다."]),
+        ("맞죠 다음을 봅니다.", ["맞죠", "다음을 봅니다."]),
+        ("필요 없이 중요 지표를 고쳤습니다.", ["필요 없이 중요 지표를 고쳤습니다."]),
+        ("다 끝났다 이제 쉰다", ["다 끝났다", "이제 쉰다"]),
+    ],
+)
+def test_sentence_split_present_and_casual_endings(text: str, expected: list[str]) -> None:
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from lint_report import sentences
+
+    assert sentences(text) == expected
