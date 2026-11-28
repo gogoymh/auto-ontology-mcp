@@ -9,6 +9,13 @@ using the built-in retail demo database and demo knowledge store:
   4. check_answerable
   5. validate_sql
 
+Every run also times hybrid ``search_ontology`` (lexical + vector) with a
+deterministic hash embedder, so vector sync and cached hybrid search latency are
+compared against the baseline without fastembed or a model download.
+
+Latency is noisy on shared machines, so ``--repeats`` runs the suite several
+times and reports the median of each run's p50/p95 for the baseline comparison.
+
 With ``--semantic`` it also runs the ``semantic_search`` task set (synonym,
 paraphrase and Korean-English cross-lingual queries) twice, once lexical-only
 and once with the optional local hybrid search (fastembed + sqlite-vec), and
@@ -21,6 +28,7 @@ state or requesting GUI focus.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import math
@@ -38,6 +46,7 @@ from typing import Any
 from auto_ontology_mcp.config import Settings
 from auto_ontology_mcp.demo import build_demo_database
 from auto_ontology_mcp.demo_knowledge import seed_demo_knowledge
+from auto_ontology_mcp.semantic import normalize_vector
 from auto_ontology_mcp.service import OntologyService
 
 logger = logging.getLogger("auto_ontology_mcp.benchmark")
@@ -57,10 +66,39 @@ LATENCY_CATEGORIES = (
     "fulltext_search",
     "check_answerable",
     "validate_sql",
+    "vector_sync",
+    "hybrid_search",
 )
 SEMANTIC_GROUPS = ("synonym", "paraphrase", "cross_lingual")
 SEMANTIC_MODES = ("lexical", "hybrid")
 SEMANTIC_RECALL_K = 3
+SCHEMA_VERSION = 2
+HASH_EMBED_DIM = 64
+
+
+class HashEmbedder:
+    """Deterministic bag-of-words embedder: each token hashes to one of HASH_EMBED_DIM axes.
+
+    It has no semantic quality; it exists so hybrid search (embed, vector sync, vector query,
+    fusion) can be timed in CI without fastembed or a model download.
+    """
+
+    model_name = "bench-hash-v1"
+
+    @staticmethod
+    def _encode(text: str) -> list[float]:
+        vec = [0.0] * HASH_EMBED_DIM
+        vec[0] = 0.05  # keep every vector non-zero
+        for token in (text or "").casefold().split():
+            digest = hashlib.blake2b(token.encode("utf-8"), digest_size=4).digest()
+            vec[1 + int.from_bytes(digest, "big") % (HASH_EMBED_DIM - 1)] += 1.0
+        return normalize_vector(vec)
+
+    def embed_documents(self, texts: Any) -> list[list[float]]:
+        return [self._encode(t) for t in texts]
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._encode(text)
 
 
 def _git_commit() -> str:
@@ -100,7 +138,12 @@ def _latency_summary(samples_ms: list[float]) -> dict[str, float]:
 
 
 def _make_service(
-    root: Path, demo_db: Path, *, semantic: bool = False, embedder: Any = None
+    root: Path,
+    demo_db: Path,
+    *,
+    semantic: bool = False,
+    embedder: Any = None,
+    use_sqlite_vec: bool | None = None,
 ) -> tuple[OntologyService, float]:
     """Build an isolated service; core benchmarks stay lexical so results never depend on a model."""
     settings = replace(
@@ -116,6 +159,8 @@ def _make_service(
     if semantic and embedder is not None:
         svc.vectors._embedder = embedder
         svc.vectors._model_name = embedder.model_name
+        if use_sqlite_vec is not None:
+            svc.vectors._use_sqlite_vec = use_sqlite_vec
     t0 = time.perf_counter()
     svc.add_datasource("demo", f"sqlite:///{demo_db}", description="benchmark demo")
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
@@ -569,6 +614,60 @@ def _eval_validate_sql(
     )
 
 
+def _make_hybrid_service(root: Path, demo_db: Path, setup: dict[str, Any]) -> OntologyService:
+    # The plain SQLite blob backend keeps the measurement identical with or without sqlite-vec installed.
+    svc, _ = _make_service(root, demo_db, semantic=True, embedder=HashEmbedder(), use_sqlite_vec=False)
+    if not svc.vectors.is_available():
+        raise RuntimeError("hybrid benchmark: vector index unavailable with the hash embedder")
+    _apply_setup(svc, setup)
+    return svc
+
+
+def _hybrid_query(svc: OntologyService, item: dict[str, Any]) -> dict[str, Any]:
+    out = svc.search_ontology(item["query"], kinds=item.get("kinds"), datasource=item.get("datasource"))
+    if out.get("search_mode") != "hybrid":
+        raise RuntimeError(f"hybrid benchmark: search ran in {out.get('search_mode')} mode")
+    return out
+
+
+def _reset_vectors(svc: OntologyService) -> None:
+    """Drop the vector index so the next query embeds and indexes every document again."""
+    svc._synced_ontology_digest.clear()
+    path = svc.vectors.path
+    for suffix in ("", "-wal", "-shm"):
+        path.with_name(path.name + suffix).unlink(missing_ok=True)
+
+
+def _eval_hybrid_search(
+    tmp_path: Path,
+    demo_db: Path,
+    setup: dict[str, Any],
+    tasks_spec: list[dict[str, Any]],
+    *,
+    warmup: int,
+    iterations: int,
+) -> tuple[list[float], list[float]]:
+    """Time hybrid search_ontology: the first query on a fresh store (full vector sync) and warm queries."""
+    svc = _make_hybrid_service(tmp_path / "hybrid", demo_db, setup)
+    sync_latencies: list[float] = []
+    first = tasks_spec[0]
+    for _ in range(iterations):
+        _reset_vectors(svc)
+        t0 = time.perf_counter()
+        _hybrid_query(svc, first)
+        sync_latencies.append((time.perf_counter() - t0) * 1000.0)
+    for _ in range(warmup):
+        for item in tasks_spec:
+            _hybrid_query(svc, item)
+    latencies: list[float] = []
+    for _ in range(iterations):
+        for item in tasks_spec:
+            t0 = time.perf_counter()
+            _hybrid_query(svc, item)
+            latencies.append((time.perf_counter() - t0) * 1000.0)
+    return sync_latencies, latencies
+
+
 def _hit_label(hit: dict[str, Any]) -> str | None:
     return hit.get("name") or hit.get("heading") or hit.get("title")
 
@@ -702,18 +801,9 @@ def run_semantic_benchmark(
     return {"tasks_total": len(tasks_spec), "recall_k": SEMANTIC_RECALL_K, "modes": modes, "delta": delta}
 
 
-def run_benchmark(
-    tasks_path: Path = DEFAULT_TASKS_PATH,
-    *,
-    warmup: int = 1,
-    iterations: int = 3,
-) -> dict[str, Any]:
-    """Run the full headless benchmark suite in an isolated temporary directory."""
-    spec = json.loads(Path(tasks_path).read_text(encoding="utf-8"))
+def _run_once(spec: dict[str, Any], *, warmup: int, iterations: int) -> dict[str, Any]:
+    """Run the full headless benchmark suite once in an isolated temporary directory."""
     seed = int(spec.get("seed", 7))
-    iterations = max(1, int(iterations))
-    warmup = max(0, int(warmup))
-
     suite_start = time.perf_counter()
     scan_latencies: list[float] = []
 
@@ -750,6 +840,9 @@ def run_benchmark(
         vs_score, vs_lat = _eval_validate_sql(
             svc, spec["validate_sql"], warmup=warmup, iterations=iterations
         )
+        sync_lat, hyb_lat = _eval_hybrid_search(
+            tmp_path, demo_db, spec["setup"], spec["ontology_search"], warmup=warmup, iterations=iterations
+        )
 
     total_suite_ms = round((time.perf_counter() - suite_start) * 1000.0, 3)
     scores = {
@@ -762,13 +855,6 @@ def run_benchmark(
     overall = round(statistics.fmean(scores[c]["score"] for c in SCORE_CATEGORIES), 4)
 
     return {
-        "schema_version": 1,
-        "tasks_version": str(spec.get("version", "1")),
-        "git_commit": _git_commit(),
-        "measured_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "python_version": platform.python_version(),
-        "warmup": warmup,
-        "iterations": iterations,
         "overall_score": overall,
         "scores": scores,
         "latency_ms": {
@@ -777,8 +863,69 @@ def run_benchmark(
             "fulltext_search": _latency_summary(ft_lat),
             "check_answerable": _latency_summary(ca_lat),
             "validate_sql": _latency_summary(vs_lat),
+            "vector_sync": _latency_summary(sync_lat),
+            "hybrid_search": _latency_summary(hyb_lat),
             "total_suite_ms": total_suite_ms,
         },
+    }
+
+
+def _median_latency(runs: list[dict[str, Any]], cat: str) -> dict[str, Any]:
+    """Median of each run's summary, so one run slowed by background load cannot move the p50."""
+    per_run = [r["latency_ms"][cat] for r in runs]
+    return {
+        "mean": round(statistics.median(p["mean"] for p in per_run), 3),
+        "p50": round(statistics.median(p["p50"] for p in per_run), 3),
+        "p95": round(statistics.median(p["p95"] for p in per_run), 3),
+        "count": sum(p["count"] for p in per_run),
+        "p50_runs": [p["p50"] for p in per_run],
+    }
+
+
+def run_benchmark(
+    tasks_path: Path = DEFAULT_TASKS_PATH,
+    *,
+    warmup: int = 1,
+    iterations: int = 3,
+    repeats: int = 1,
+) -> dict[str, Any]:
+    """Run the suite ``repeats`` times; quality comes from the first run, latency is the median across runs."""
+    spec = json.loads(Path(tasks_path).read_text(encoding="utf-8"))
+    iterations = max(1, int(iterations))
+    warmup = max(0, int(warmup))
+    repeats = max(1, int(repeats))
+
+    runs: list[dict[str, Any]] = []
+    for r in range(repeats):
+        runs.append(_run_once(spec, warmup=warmup, iterations=iterations))
+        logger.info(
+            "benchmark run %d/%d: overall=%.4f hybrid_search p50=%.3fms vector_sync p50=%.3fms",
+            r + 1, repeats, runs[-1]["overall_score"],
+            runs[-1]["latency_ms"]["hybrid_search"]["p50"], runs[-1]["latency_ms"]["vector_sync"]["p50"],
+        )
+    first = runs[0]
+    for r, run in enumerate(runs[1:], start=2):
+        if run["overall_score"] != first["overall_score"]:
+            logger.warning(
+                "benchmark run %d quality differs from run 1 (%.4f vs %.4f); reporting run 1",
+                r, run["overall_score"], first["overall_score"],
+            )
+
+    latency: dict[str, Any] = {cat: _median_latency(runs, cat) for cat in LATENCY_CATEGORIES}
+    latency["total_suite_ms"] = round(statistics.median(r["latency_ms"]["total_suite_ms"] for r in runs), 3)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "tasks_version": str(spec.get("version", "1")),
+        "git_commit": _git_commit(),
+        "measured_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "python_version": platform.python_version(),
+        "warmup": warmup,
+        "iterations": iterations,
+        "repeats": repeats,
+        "hybrid_embedder": HashEmbedder.model_name,
+        "overall_score": first["overall_score"],
+        "scores": first["scores"],
+        "latency_ms": latency,
     }
 
 
@@ -838,6 +985,17 @@ def compare_results(
     latency_diffs: dict[str, dict[str, Any]] = {}
     latency_regressions: list[dict[str, Any]] = []
     for cat in LATENCY_CATEGORIES:
+        if cat not in baseline.get("latency_ms", {}) or cat not in current.get("latency_ms", {}):
+            # Older snapshots predate this category; report it without judging.
+            latency_diffs[cat] = {
+                "baseline_p50_ms": (baseline.get("latency_ms", {}).get(cat) or {}).get("p50"),
+                "current_p50_ms": (current.get("latency_ms", {}).get(cat) or {}).get("p50"),
+                "delta_ms": None,
+                "ratio": None,
+                "regressed": False,
+                "missing": True,
+            }
+            continue
         b_p50 = float(baseline["latency_ms"][cat]["p50"])
         c_p50 = float(current["latency_ms"][cat]["p50"])
         delta_ms = round(c_p50 - b_p50, 3)
@@ -862,6 +1020,8 @@ def compare_results(
         "failed": failed,
         "baseline_commit": baseline.get("git_commit"),
         "current_commit": current.get("git_commit"),
+        "baseline_repeats": baseline.get("repeats", 1),
+        "current_repeats": current.get("repeats", 1),
         "overall": {
             "baseline": base_overall,
             "current": curr_overall,
@@ -891,6 +1051,8 @@ def _format_run_text(result: dict[str, Any]) -> str:
         lines.append(
             f"  - {cat:24s} p50={lat['p50']:.3f}ms  p95={lat['p95']:.3f}ms  mean={lat['mean']:.3f}ms"
         )
+    if result.get("repeats", 1) > 1:
+        lines.append(f"  (median of {result['repeats']} runs)")
     lines.append(f"  - {'total_suite_ms':24s} {result['latency_ms']['total_suite_ms']:.3f}ms")
     return "\n".join(lines)
 
@@ -918,6 +1080,9 @@ def _format_run_markdown(result: dict[str, Any]) -> str:
         lines.append(
             f"| {cat} | {s['score']:.4f} | {s['passed']}/{s['total']} | {lat['p50']:.3f} | {lat['p95']:.3f} |"
         )
+    for cat in ("vector_sync", "hybrid_search"):
+        lat = result["latency_ms"][cat]
+        lines.append(f"| {cat} (latency only) | | | {lat['p50']:.3f} | {lat['p95']:.3f} |")
     return "\n".join(lines)
 
 
@@ -983,9 +1148,12 @@ def _format_compare_text(cmp: dict[str, Any]) -> str:
         if q["newly_failing"]:
             lines.append(f"      newly failing: {', '.join(q['newly_failing'])}")
     lines.append("")
-    lines.append("Latency p50 delta (ms):")
+    lines.append(f"Latency p50 delta (ms, median of {cmp.get('current_repeats', 1)} runs):")
     for cat in LATENCY_CATEGORIES:
         lat = cmp["latency"][cat]
+        if lat.get("missing"):
+            lines.append(f"  - {cat:24s} not in both snapshots, skipped")
+            continue
         flag = " [SLOWDOWN]" if lat["regressed"] else ""
         lines.append(
             f"  - {cat:24s} {lat['baseline_p50_ms']:.3f} -> {lat['current_p50_ms']:.3f} "
@@ -1014,11 +1182,14 @@ def _format_compare_markdown(cmp: dict[str, Any]) -> str:
         lines.append(f"| {cat} | {q['baseline']:.4f} | {q['current']:.4f} | {q['delta']:+.4f} | {state} |")
     lines += [
         "",
-        "| Latency (p50 ms) | Baseline | Current | Ratio | Status |",
+        f"| Latency (p50 ms, median of {cmp.get('current_repeats', 1)} runs) | Baseline | Current | Ratio | Status |",
         "|---|---:|---:|---:|---|",
     ]
     for cat in LATENCY_CATEGORIES:
         lat = cmp["latency"][cat]
+        if lat.get("missing"):
+            lines.append(f"| {cat} | - | - | - | NO BASELINE |")
+            continue
         state = "SLOWDOWN" if lat["regressed"] else "OK"
         lines.append(
             f"| {cat} | {lat['baseline_p50_ms']:.3f} | {lat['current_p50_ms']:.3f} | {lat['ratio']:.2f}x | {state} |"
@@ -1049,6 +1220,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--warmup", type=int, default=1, help="Warmup passes before timing.")
     parser.add_argument("--iterations", type=int, default=3, help="Timed passes per benchmark area.")
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=3,
+        help="Run the suite this many times and compare the median latency across runs.",
+    )
     parser.add_argument("--quality-tolerance", type=float, default=0.0, help="Allowed quality drop before failure.")
     parser.add_argument("--fail-on-latency", action="store_true", help="Exit 1 on latency regressions.")
     parser.add_argument("--max-latency-ratio", type=float, default=2.5, help="Max p50 latency ratio vs baseline.")
@@ -1100,7 +1277,7 @@ def main(argv: list[str] | None = None) -> int:
         _append_summary(args.summary_file, cmp)
         return 1 if cmp["failed"] else 0
 
-    result = run_benchmark(args.tasks, warmup=args.warmup, iterations=args.iterations)
+    result = run_benchmark(args.tasks, warmup=args.warmup, iterations=args.iterations, repeats=args.repeats)
     if args.semantic:
         try:
             result["semantic_search"] = run_semantic_benchmark(

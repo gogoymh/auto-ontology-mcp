@@ -29,6 +29,7 @@ def test_ci_runs_benchmark_compare_step():
     step = steps[idx]
     run = " ".join(step["run"].split())
     assert '--summary-file "$GITHUB_STEP_SUMMARY"' in run
+    assert "--repeats 5" in run  # latency is compared as a median across runs
     assert "--fail-on-latency" not in run  # shared runners are noisy; only quality fails CI
     assert "continue-on-error" not in step
     sync = next(i for i, s in enumerate(steps) if "uv sync" in str(s.get("run", "")))
