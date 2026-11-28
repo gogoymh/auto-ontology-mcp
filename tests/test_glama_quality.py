@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import tomllib
@@ -227,7 +228,12 @@ def test_release_tags():
     if skip_reason is not None:
         skip_unless_required(skip_reason, "CI")
     assert tags is not None
-    for expected_tag in ("v0.4.0", "v0.5.0", "v0.6.0", f"v{__version__}"):
+    expected = ["v0.4.0", "v0.5.0", "v0.6.0"]
+    # The current version is tagged only after its release commit lands, so only a tag-triggered run
+    # (the release workflow) can demand it; a PR that bumps the version has no tag yet.
+    if os.environ.get("GITHUB_REF_TYPE") == "tag":
+        expected.append(f"v{__version__}")
+    for expected_tag in expected:
         assert tags.get(expected_tag) == "tag", f"annotated git tag {expected_tag} is missing"
 
 
