@@ -22,6 +22,14 @@ def _opt_bool(name: str) -> bool | None:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _opt_float(name: str) -> float | None:
+    raw = (os.environ.get(name) or "").strip()
+    try:
+        return float(raw) if raw else None
+    except ValueError:
+        return None
+
+
 def _int(name: str, default: int) -> int:
     raw = os.environ.get(name)
     try:
@@ -116,6 +124,10 @@ class Settings:
     embedding_cache_dir: Path | None = None
     """Optional cache directory for fastembed ONNX models (AUTO_ONTOLOGY_EMBEDDING_CACHE)."""
 
+    min_similarity: float | None = None
+    """Cosine floor for vector hits (AUTO_ONTOLOGY_MIN_SIMILARITY). Unset: the model's measured
+    floor (0.50 for MiniLM, 0.40 for mpnet, 0.50 for any other model)."""
+
     @classmethod
     def from_env(cls) -> "Settings":
         home = Path(os.environ.get("AUTO_ONTOLOGY_HOME", "~/.auto-ontology-mcp")).expanduser()
@@ -140,4 +152,5 @@ class Settings:
             embedding_model=os.environ.get("AUTO_ONTOLOGY_EMBEDDING_MODEL")
             or "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
             embedding_cache_dir=Path(cache).expanduser() if cache else None,
+            min_similarity=_opt_float("AUTO_ONTOLOGY_MIN_SIMILARITY"),
         )
