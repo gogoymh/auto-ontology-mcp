@@ -1,6 +1,6 @@
 [project]
 name = "auto-ontology-mcp"
-version = "0.6.1"
+version = "0.6.2"
 description = "NVIDIA Auto Ontology's semantic layer and a personal knowledge base as an MCP server for Claude, ChatGPT and other MCP clients. The client model is the LLM; no model API key needed."
 readme = "README.md"
 license = "Apache-2.0"
@@ -22,6 +22,7 @@ postgres = ["psycopg[binary]>=3.2"]
 mysql = ["pymysql>=1.1"]
 duckdb = ["duckdb-engine>=0.15"]
 oracle = ["oracledb>=2.0"]
+semantic = ["fastembed>=0.4", "sqlite-vec>=0.1.6"]
 all = ["psycopg[binary]>=3.2", "pymysql>=1.1", "duckdb-engine>=0.15", "oracledb>=2.0"]
 
 [project.scripts]

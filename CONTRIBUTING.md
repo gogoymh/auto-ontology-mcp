@@ -34,6 +34,27 @@ AO_TEST_PG_URL=postgresql+psycopg://postgres:pw@127.0.0.1:55432/postgres uv run 
 
 Pull requests are squash-merged, so the pull request title becomes the commit message on `main`. Write it as a sentence about the change (`Warn when a filter compares a percent column with a fraction`).
 
+## Following upstream
+
+This project derives from [NVIDIA Auto Ontology](https://github.com/NVIDIA/auto-ontology) (see [NOTICE](NOTICE)). `scripts/upstream_scout.py` lists the upstream pull requests merged since the last review, grouped by whether they touch code adapted here (`ported`), an area with a counterpart here (`related`) or upstream-only parts such as the web app (`other`):
+
+```bash
+python3 scripts/upstream_scout.py                    # digest since scripts/upstream_state.json
+python3 scripts/upstream_scout.py --up-to-date       # exit 0 when there is nothing new
+python3 scripts/upstream_scout.py --mark-reviewed SHA  # after filing tickets for the digest up to SHA
+python3 scripts/upstream_scout.py --diff guidance.py   # upstream changes not yet ported into guidance.py
+python3 scripts/upstream_scout.py --mark-synced guidance.py  # record the upstream head as ported there
+```
+
+Each entry under `ported` in `scripts/upstream_state.json` names an upstream path, the local files adapted from it and `synced`, the last upstream commit ported into them. `--diff FILE` shows only the upstream commits and diff after that commit, so you never reread pull requests that are already in.
+
+A porting ticket ends with the file's commit:
+
+1. Run `--diff FILE` and port what you need.
+2. Run `--mark-synced FILE` (add `--at SHA` if you ported only up to an older commit) and commit the updated `scripts/upstream_state.json` in the same pull request.
+
+Upstream history is kept as a blobless clone in `~/.cache/auto-ontology-mcp/` (a few MB). Port ideas, not code that is not Apache-2.0. When you adapt a new upstream file, add it to NOTICE and as a `ported` entry in `scripts/upstream_state.json`, with `synced` set to the upstream commit you ported from.
+
 ## Safety rules for changes
 
 The server connects to other people's databases. A change must not:

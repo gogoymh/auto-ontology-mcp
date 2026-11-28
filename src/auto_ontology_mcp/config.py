@@ -15,6 +15,13 @@ def _bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _opt_bool(name: str) -> bool | None:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "" or raw.strip().lower() == "auto":
+        return None
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _int(name: str, default: int) -> int:
     raw = os.environ.get(name)
     try:
@@ -99,10 +106,21 @@ class Settings:
     """Tool groups to expose (AUTO_ONTOLOGY_TOOLSETS, comma-separated; default all). A client that only
     asks questions of modeled databases needs 'answer'; fewer tools leave the model more context."""
 
+    semantic_search: bool | None = None
+    """Optional local hybrid semantic search (AUTO_ONTOLOGY_SEMANTIC): unset/'auto' enables it when
+    fastembed and sqlite-vec are installed; 0/false disables it even when installed."""
+
+    embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    """Local fastembed ONNX model name (AUTO_ONTOLOGY_EMBEDDING_MODEL)."""
+
+    embedding_cache_dir: Path | None = None
+    """Optional cache directory for fastembed ONNX models (AUTO_ONTOLOGY_EMBEDDING_CACHE)."""
+
     @classmethod
     def from_env(cls) -> "Settings":
         home = Path(os.environ.get("AUTO_ONTOLOGY_HOME", "~/.auto-ontology-mcp")).expanduser()
         store = os.environ.get("AUTO_ONTOLOGY_STORE")
+        cache = os.environ.get("AUTO_ONTOLOGY_EMBEDDING_CACHE")
         return cls(
             home=home,
             store_path=Path(store).expanduser() if store else home / "ontology.db",
@@ -118,4 +136,8 @@ class Settings:
             toolsets=_toolsets(os.environ.get("AUTO_ONTOLOGY_TOOLSETS")),
             oracle_client_lib=os.environ.get("AUTO_ONTOLOGY_ORACLE_CLIENT_LIB") or None,
             scan_tables=_patterns(os.environ.get("AUTO_ONTOLOGY_SCAN_TABLES")),
+            semantic_search=_opt_bool("AUTO_ONTOLOGY_SEMANTIC"),
+            embedding_model=os.environ.get("AUTO_ONTOLOGY_EMBEDDING_MODEL")
+            or "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            embedding_cache_dir=Path(cache).expanduser() if cache else None,
         )

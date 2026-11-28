@@ -31,7 +31,8 @@ from .inference import names_own_table
 from .knowledge import KNOWLEDGE_DS, SOURCES_TABLE, Knowledge, is_builtin
 from .naming import clean_label, compact, id_base, to_label
 from .profiling import is_numeric_type
-from .search import build_docs, search
+from .search import KINDS as SEARCH_DOC_KINDS, NAME_SUFFIX, Doc, build_docs, doc_text, name_text, search
+from .semantic import ONTOLOGY_MIN_SEMANTIC, VectorIndex, content_hash
 from .sqlcheck import SqlGuardError, analyze, extract_expressions, first_statement, guard_readonly, guard_sources, normalize_sql
 from .store import Store, new_id, now
 from .validation import Validator, limited, qtable
@@ -74,10 +75,24 @@ class OntologyService:
         self.store = Store(settings.store_path)
         self.connections = Connections(settings.query_timeout_s, oracle_client_lib=settings.oracle_client_lib)
         self.scanner = Scanner(self.store, self.connections, settings.profile_sample_rows, settings.scan_workers)
+        vec_path = settings.store_path.with_name(f"{settings.store_path.stem}.vectors.sqlite")
+        self.vectors = VectorIndex(
+            vec_path,
+            enabled=settings.semantic_search,
+            model_name=settings.embedding_model,
+            cache_dir=settings.embedding_cache_dir,
+        )
+        self._synced_ontology_digest: dict[str, tuple[str, str]] = {}
+        # The per-revision cached document list last synced per datasource: the same list object
+        # means the same documents, so the vector sync skips hashing every document again.
+        self._synced_docs: dict[str, tuple[Any, list[Any]]] = {}
         self.knowledge = Knowledge(self)
         # Documents are rebuilt per search today; one entry per datasource, keyed on the store's
         # revision, removes the rebuild without ever serving a stale set.
         self._docs_cache: dict[str, tuple[int, list[Any]]] = {}
+
+    def semantic_status(self) -> dict[str, Any]:
+        return self.vectors.status()
 
     # =============================================================== resolution
     def ds(self, name: str | None = None) -> dict[str, Any]:
@@ -227,6 +242,7 @@ class OntologyService:
             "server_version": __version__,
             "datasources": out,
             "can_add_datasources": self.settings.allow_datasource_tools,
+            "semantic_search": self.semantic_status(),
             "next_step": None if out else (
                 "No datasource yet. To keep personal knowledge, start with define_entity or save_concept "
                 "(the 'knowledge' store is created on first use). To query a database, call add_datasource(name, url) "
@@ -1183,17 +1199,78 @@ class OntologyService:
             self._docs_cache.pop(ds["id"], None)
         return docs
 
-    def _search(self, ds: dict[str, Any], query: str, kinds: list[str] | None = None, limit: int = 10, docs=None) -> list[dict[str, Any]]:
-        return search(query, docs if docs is not None else self._docs(ds), kinds=kinds, limit=limit)
+    def _sync_ontology_vectors(self, ds: dict[str, Any], docs: list[Doc]) -> None:
+        last = self._synced_docs.get(ds["id"])
+        if last is not None and last[0] is self.vectors and last[1] is docs and self.vectors.path.exists():
+            return
+        by_kind: dict[str, dict[str, str]] = {k: {} for k in SEARCH_DOC_KINDS}
+        digest_parts: list[str] = []
+        for doc in docs:
+            text = doc_text(doc)
+            if not text:
+                continue
+            by_kind.setdefault(doc.kind, {})[doc.id] = text
+            digest_parts.append(f"{doc.kind}:{doc.id}:{content_hash(text)}")
+            name = name_text(doc)
+            if name:
+                # A second vector of the bare name: short queries ("매출", "turnover") sit
+                # close to "Revenue" but far from the full text with its samples and SQL.
+                by_kind[doc.kind][doc.id + NAME_SUFFIX] = name
+                digest_parts.append(f"{doc.kind}:{doc.id}{NAME_SUFFIX}:{content_hash(name)}")
+        digest = content_hash("\n".join(sorted(digest_parts)))
+        cache_key = (self.vectors.model_name, digest)
+        if self._synced_ontology_digest.get(ds["id"]) == cache_key and self.vectors.path.exists():
+            return
+        scope = f"ontology:{ds['id']}"
+        for kind, items in by_kind.items():
+            self.vectors.sync_items(scope, kind, items)
+        self._synced_ontology_digest[ds["id"]] = cache_key
+        self._synced_docs[ds["id"]] = (self.vectors, docs)
+
+    def _search(
+        self,
+        ds: dict[str, Any],
+        query: str,
+        kinds: list[str] | None = None,
+        limit: int = 10,
+        docs=None,
+        *,
+        min_semantic: float = ONTOLOGY_MIN_SEMANTIC,
+    ) -> list[dict[str, Any]]:
+        doc_list = docs if docs is not None else self._docs(ds)
+        if not self.vectors.is_available():
+            return search(query, doc_list, kinds=kinds, limit=limit)
+        self._sync_ontology_vectors(ds, doc_list)
+        wanted = [k for k in (kinds or SEARCH_DOC_KINDS) if k in SEARCH_DOC_KINDS] or list(SEARCH_DOC_KINDS)
+        vec_hits = self.vectors.search(
+            f"ontology:{ds['id']}",
+            wanted,
+            query,
+            limit=max(limit * 3, 25),
+            min_similarity=min_semantic,
+        )
+        # A document scores the better of its full-text and name vectors.
+        sem_scores: dict[tuple[str, str], float] = {}
+        for h in vec_hits:
+            key = (h.kind, h.item_id.removesuffix(NAME_SUFFIX))
+            if h.similarity > sem_scores.get(key, -1.0):
+                sem_scores[key] = h.similarity
+        return search(query, doc_list, kinds=kinds, limit=limit, semantic_scores=sem_scores, min_semantic=min_semantic)
 
     def search_ontology(self, query: str, kinds: list[str] | None = None, limit: int = 10, datasource: str | None = None) -> dict[str, Any]:
         ds = self.ds(datasource)
+        semantic_on = self.vectors.is_available()
         hits = self._search(ds, query, kinds=[k for k in kinds if k != "value"] if kinds else None, limit=max(1, min(limit, 50)))
         # Records are searched by their stored text in the knowledge store (and elsewhere on request).
         if (kinds is None and self.knowledge.is_knowledge(ds)) or (kinds and "value" in kinds):
             for v in self._value_hits(ds, query, [40]):
                 hits.append({"kind": "value", "term": v["term"], "attribute": v["attribute"], "column": v["column"], "values": v["values"]})
-        out: dict[str, Any] = {"datasource": ds["name"], "query": query, "hits": hits}
+        out: dict[str, Any] = {
+            "datasource": ds["name"],
+            "query": query,
+            "search_mode": "hybrid" if semantic_on else "lexical",
+            "hits": hits,
+        }
         if kinds is None and self.knowledge.is_knowledge(ds):
             try:
                 text = self.knowledge.search_text(query, limit=5)
@@ -1203,7 +1280,9 @@ class OntologyService:
                 out["text_hits"] = text["hits"]
                 out["text_hint"] = "Passages, bodies and sources that mention these words; search_text returns more, with filters."
         out["hint"] = None if hits or out.get("text_hits") else (
-            "Nothing matched lexically. Try the schema's own words, a synonym, singular/plural, or translate the phrase."
+            "Nothing matched lexically or semantically. Try the schema's own words, a synonym, singular/plural, or translate the phrase."
+            if semantic_on
+            else "Nothing matched lexically. Try the schema's own words, a synonym, singular/plural, or translate the phrase."
         )
         return out
 
@@ -1459,7 +1538,9 @@ class OntologyService:
         covered = 0.0
         value_budget = [60]  # columns probed across the whole question
         for ent in entities:
-            found = self._search(ds, ent, kinds=["term", "attribute", "sql_attribute", "glossary", "table"], limit=6, docs=docs)
+            found = self._search(
+                ds, ent, kinds=["term", "attribute", "sql_attribute", "glossary", "table"], limit=6, docs=docs, min_semantic=0.75
+            )
             # As upstream, the glossary interprets a phrase and the semantic model covers it: a glossary
             # entry is never the match itself, its definition is looked up instead.
             glossary = [h for h in found if h["kind"] == "glossary"]
