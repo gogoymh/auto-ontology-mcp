@@ -1,5 +1,6 @@
 """scripts/polish_hook.py must block agent text people read (reports, comments, messages, issue titles and bodies, docs) with polish patterns."""
 import json
+import os
 import re
 import subprocess
 import sys
@@ -18,9 +19,67 @@ CLEAN = "완료 보고 직전에 윤문 점검을 자동으로 돌립니다. 패
 DIRTY = "벤치마크 자동 실행·기준선 비교 연동은 @benchmark의 역할에 정확히 부합합니다."
 
 
+@pytest.fixture(autouse=True)
+def block_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Every test records blocks in its own file, never in the repository's shared log."""
+    path = tmp_path / "polish_blocks.jsonl"
+    monkeypatch.setenv("POLISH_BLOCK_LOG", str(path))
+    return path
+
+
 def _run(tool: str, args: dict) -> subprocess.CompletedProcess:
     payload = json.dumps({"tool_name": tool, "tool_input": args}, ensure_ascii=False)
-    return subprocess.run([sys.executable, str(HOOK)], input=payload, capture_output=True, text=True, timeout=10)
+    return subprocess.run([sys.executable, str(HOOK)], input=payload, capture_output=True, text=True, timeout=10, env=os.environ.copy())
+
+
+def _records(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+
+
+def test_block_records_one_line_per_finding(block_file: Path) -> None:
+    res = _run("mcp__cua__issue_update", {"id": 3, "status": "done", "body": DIRTY, "title": "해당 스크립트 연동"})
+    assert res.returncode == 2, res.stderr
+    rows = _records(block_file)
+    assert {(r["tool"], r["field"]) for r in rows} == {("issue_update", "title"), ("issue_update", "body")}
+    pairs = {(r["field"], r["pattern"]) for r in rows}
+    assert {("body", "translationese"), ("body", "middot"), ("title", "translationese"), ("title", "nominal")} <= pairs
+    assert len({r["ts"] for r in rows}) == 1 and all(set(r) == {"ts", "tool", "field", "pattern"} for r in rows)
+    assert "recorded" in res.stderr
+
+
+def test_block_records_append_and_short_tool_name(block_file: Path) -> None:
+    assert _run("mcp__preconquer__doc_comment", {"name": "정리", "id": "c1", "text": "반영을 마쳤습니다."}).returncode == 2
+    assert _run("mcp__cua__message_post", {"text": "검토 시 기준선을 봅니다."}).returncode == 2
+    rows = _records(block_file)
+    assert [(r["tool"], r["field"]) for r in rows][-1] == ("message_post", "text")
+    assert ("doc_comment", "text", "empty") in {(r["tool"], r["field"], r["pattern"]) for r in rows}
+    assert rows[-1]["pattern"] == "nounstack" and len({r["ts"] for r in rows}) == 2
+
+
+def test_pass_records_nothing(block_file: Path) -> None:
+    assert _run(TOOL, {"id": 1, "summary": CLEAN, "next": CLEAN}).returncode == 0
+    assert _run("mcp__cua__issue_get", {"text": DIRTY}).returncode == 0
+    assert not block_file.exists()
+
+
+def test_unwritable_log_still_blocks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("POLISH_BLOCK_LOG", str(tmp_path / "missing-dir" / "polish_blocks.jsonl"))
+    res = _run(TOOL, {"id": 1, "summary": DIRTY})
+    assert res.returncode == 2 and "translationese: " in res.stderr, res.stderr
+    assert "could not record blocks" in res.stderr
+
+
+def test_default_log_is_shared_by_worktrees(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("POLISH_BLOCK_LOG")
+    repo, tree = tmp_path / "repo", tmp_path / "tree"
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"]
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run([*git, "-C", str(repo), "commit", "-q", "--allow-empty", "-m", "init"], check=True)
+    subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", str(tree)], check=True)
+    main, other = polish_hook.block_log(repo), polish_hook.block_log(tree)
+    assert main == other == (repo / ".git" / "polish_blocks.jsonl").resolve()
+    polish_hook.record("message_post", {"text": [("nounstack", "검토 시")]}, other)
+    assert _records(main)[0]["pattern"] == "nounstack"
 
 
 def test_blocks_summary_with_skill_example() -> None:
