@@ -464,7 +464,7 @@ def test_vector_index_fastembed_wrapper_uses_lazy_cache(monkeypatch, tmp_path):
     class FakeModule:
         TextEmbedding = FakeTextEmbedding
 
-    semantic._MODEL_CACHE.clear()
+    monkeypatch.setattr(semantic, "_MODEL_CACHE", {})
     monkeypatch.setattr(semantic.importlib, "import_module", lambda name: FakeModule)
 
     emb = semantic.FastEmbedder("test/model", cache_dir=tmp_path)
@@ -478,7 +478,6 @@ def test_vector_index_fastembed_wrapper_uses_lazy_cache(monkeypatch, tmp_path):
     # Second instance with same model_name/cache_dir reuses cached model.
     semantic.FastEmbedder("test/model", cache_dir=tmp_path).embed_query("again")
     assert len(created) == 1
-    semantic._MODEL_CACHE.clear()
 
 
 def test_hybrid_search_reuses_cached_revision_docs(settings, tmp_path, monkeypatch):

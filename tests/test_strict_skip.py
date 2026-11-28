@@ -65,9 +65,8 @@ def test_ci_semantic_step_requires_semantic():
     assert str(step["env"]["AO_REQUIRE_SEMANTIC"]) == "1"
 
 
-def test_ci_model_cache_key_names_only_the_model():
-    step = next(s for s in _ci_steps() if "actions/cache" in s.get("uses", ""))
-    key = step["with"]["key"]
-    assert "hashFiles" not in key and "uv.lock" not in key
-    assert key.endswith("fastembed-paraphrase-multilingual-MiniLM-L12-v2")
-    assert "restore-keys" not in step["with"]
+def test_ci_semantic_step_skips_model_cache_and_prints_durations():
+    steps = _ci_steps()
+    assert not any("actions/cache" in s.get("uses", "") for s in steps)
+    step = next(s for s in steps if "test_semantic_search.py" in s.get("run", ""))
+    assert "--durations=0" in step["run"] and "--durations-min=0" in step["run"]
