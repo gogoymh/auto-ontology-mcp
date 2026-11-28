@@ -169,3 +169,40 @@ def test_mark_synced_moves_only_that_file(ported, capsys):
     assert "Up to date." in capsys.readouterr().out
     assert scout.main(["--state", str(state), "--diff", "profiling.py"]) == 0
     assert "+profiling change" in capsys.readouterr().out
+
+
+def _load_copy(tmp_path: Path):
+    """A copy of the script outside the project, as a routine on a main without it makes one."""
+    copy = tmp_path / "tmp" / "upstream_scout.py"
+    copy.parent.mkdir()
+    copy.write_text((ROOT / "scripts" / "upstream_scout.py").read_text())
+    spec = importlib.util.spec_from_file_location("upstream_scout_copy", copy)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_temporary_copy_reads_the_working_folders_state(upstream, tmp_path, monkeypatch, capsys):
+    repo, state, base = upstream
+    work = tmp_path / "work"
+    (work / "scripts").mkdir(parents=True)
+    local = work / "scripts" / "upstream_state.json"
+    local.write_text(state.read_text())
+    monkeypatch.chdir(work)
+    copy = _load_copy(tmp_path)
+    assert copy.STATE_FILE == local
+    head = _commit(repo, "frontend/app.tsx", "New page")
+    assert copy.main([]) == 0
+    assert "New page" in capsys.readouterr().out
+    assert copy.main(["--mark-reviewed"]) == 0
+    assert json.loads(local.read_text())["reviewed"] == head != base
+
+
+def test_temporary_copy_without_state_exits_2(tmp_path, monkeypatch, caplog):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.chdir(empty)
+    copy = _load_copy(tmp_path)
+    assert copy.PORTED == []
+    assert copy.main([]) == 2
+    assert "no state file" in caplog.text

@@ -28,7 +28,19 @@ from pathlib import Path
 
 log = logging.getLogger("upstream_scout")
 
-STATE_FILE = Path(__file__).with_name("upstream_state.json")
+
+def state_file() -> Path:
+    """The state beside this script, else the working folder's scripts/upstream_state.json.
+
+    A routine on a main that lacks this script runs a temporary copy taken from the work branch
+    (git show ...:scripts/upstream_scout.py > $TMPDIR/upstream_scout.py): that copy keeps reading and
+    writing the state of the folder it runs in.
+    """
+    beside = Path(__file__).with_name("upstream_state.json")
+    return beside if beside.exists() else Path.cwd() / "scripts" / "upstream_state.json"
+
+
+STATE_FILE = state_file()
 DEFAULT_REMOTE = "https://github.com/NVIDIA/auto-ontology"
 
 # Upstream files this project adapted (see NOTICE): a change there may need porting. Each entry in
@@ -37,7 +49,9 @@ def ported_table(state: dict) -> list[tuple[str, list[str]]]:
     return [(path, entry["local"]) for path, entry in state.get("ported", {}).items()]
 
 
-PORTED: list[tuple[str, list[str]]] = ported_table(json.loads(STATE_FILE.read_text()))
+PORTED: list[tuple[str, list[str]]] = (
+    ported_table(json.loads(STATE_FILE.read_text())) if STATE_FILE.exists() else []
+)
 
 # Upstream areas with a counterpart here that was written independently: ideas may carry over.
 RELATED: list[tuple[str, list[str]]] = [
@@ -225,6 +239,11 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, stream=sys.stderr,
                         format="upstream_scout: %(message)s")
 
+    if not args.state.exists():
+        log.error("no state file at %s: run from the project folder, which keeps scripts/upstream_state.json",
+                  args.state)
+        return 2
+    log.debug("state file %s", args.state)
     state = load_state(args.state)
     if "ported" in state:
         global PORTED

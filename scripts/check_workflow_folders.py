@@ -5,7 +5,8 @@ Usage: check_workflow_folders.py {folders|routines|intact|count}
   folders   1 'Preconquer to main' is in '브랜치 병합', 2 'Upstream scout' in '원본 레포 감시',
             and no workflow is left in '루틴'
   routines  both routines keep their schedule (daily 02:00, weekly Monday 09:00)
-  intact    each workflow's steps and suggestion setting are what they were before the move
+  intact    each workflow's steps and suggestion setting are as expected (Upstream scout
+            carries the copy line of AOM-51)
   count     no workflow was removed: workflows 1 and 2 are both there
 PQ_WORKFLOWS points at another workflows folder (default: the user's auto-ontology-mcp project).
 """
@@ -32,7 +33,7 @@ EXPECTED = {
         "Upstream scout",
         "원본 레포 감시",
         {"kind": "weekly", "weekdays": [2], "hour": 9, "minute": 0},
-        "f1b0e2306ae28a0481e133fe6fa931565edd6487cdb2127b358a7be7b120b0a3",
+        "2916ee5ec7c65ce592f78496fbcd2e11991f41028f4b89c99c573c7e8e07d535",
         False,
     ),
 }
