@@ -60,5 +60,14 @@
 {"id": "AOM-14-c2", "kind": "middot", "verdict": "tp", "example": " 원격 푸시·PR 관리"},
 {"id": "AOM-14-c2", "kind": "chained", "verdict": "tp", "example": "쉬는 동안 맡았습니다: 나머지 이슈는 원격 푸시·PR 관리·사용자 결정이 필요한 반면, 이 이슈는 코드만으로"},
 {"id": "AOM-16-c1", "kind": "nounstack", "verdict": "tp", "example": "기존", "note": "'기존 태그' reads better as '이미 있는 태그'; pattern 5 covers 기존"},
-{"id": "AOM-17-c1", "kind": "selfrate", "verdict": "tp", "example": "명확한"}
+{"id": "AOM-17-c1", "kind": "selfrate", "verdict": "tp", "example": "명확한"},
+{"id": "general-23", "kind": "empty", "verdict": "tp", "example": "작업을 마쳤습니다 (작업: 내장 데모 기준 벤치마크와 비교 스크립트 추가)."},
+{"id": "general-26", "kind": "empty", "verdict": "tp", "example": "작업을 마쳤습니다 (작업: .github/workflows/ci.yml에 benchmarks/run_benc"},
+{"id": "general-27", "kind": "empty", "verdict": "tp", "example": "작업을 마쳤습니다 (작업: Glama 점수 B를 A로 올리기)."},
+{"id": "general-28", "kind": "empty", "verdict": "tp", "example": "작업을 마쳤습니다 (작업: Glama 점수 B를 A로 올리기)."},
+{"id": "general-34", "kind": "empty", "verdict": "tp", "example": "작업을 마쳤습니다 (작업: 선택적 로컬 임베딩 기반 하이브리드 검색 지원)."},
+{"id": "general-65", "kind": "empty", "verdict": "tp", "example": "작업을 마쳤습니다 (작업: AOM-25 채점)."},
+{"id": "general-68", "kind": "empty", "verdict": "tp", "example": "작업을 마쳤습니다 (작업: 빈 보고와 한자어 판정)."},
+{"id": "general-72", "kind": "empty", "verdict": "tp", "example": "작업을 마쳤습니다 (작업: 태그 없는 CI 체크아웃에서 실패하는 릴리스 태그 테스트 고치기)."},
+{"id": "general-74", "kind": "empty", "verdict": "tp", "example": "작업을 마쳤습니다 (작업: AOM-28 채점)."}
 ]
