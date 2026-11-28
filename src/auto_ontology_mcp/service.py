@@ -34,7 +34,7 @@ from .knowledge import KNOWLEDGE_DS, SOURCES_TABLE, Knowledge, is_builtin
 from .naming import clean_label, compact, id_base, to_label
 from .profiling import is_numeric_type
 from .search import KINDS as SEARCH_DOC_KINDS, NAME_SUFFIX, Doc, build_docs, doc_text, name_text, search
-from .semantic import ANSWERABLE_MARGIN, LEARN_FLOOR_RATIO, VectorIndex, content_hash
+from .semantic import LEARN_FLOOR_RATIO, VectorIndex, content_hash
 from .sqlcheck import SqlGuardError, analyze, extract_expressions, first_statement, guard_readonly, guard_sources, normalize_sql
 from .store import Store, new_id, now
 from .validation import Validator, limited, qtable
@@ -99,6 +99,8 @@ class OntologyService:
         # The per-revision cached document list last synced per datasource: the same list object
         # means the same documents, so the vector sync skips hashing every document again.
         self._synced_docs: dict[str, tuple[Any, list[Any]]] = {}
+        # Per datasource: (vector sync cache key, noise level per document) for check_answerable.
+        self._noise: dict[str, tuple[tuple[str, str], dict[tuple[str, str], float]]] = {}
         self.knowledge = Knowledge(self)
         # Documents are rebuilt per search today; one entry per datasource, keyed on the store's
         # revision, removes the rebuild without ever serving a stale set.
@@ -1288,13 +1290,18 @@ class OntologyService:
         limit: int = 10,
         docs=None,
         *,
-        min_semantic: float | None = None,
+        strict: bool = False,
     ) -> list[dict[str, Any]]:
+        """Lexical search fused with vector hits above the model's floor.
+
+        ``strict`` (check_answerable) keeps a vector hit only when it clears max(floor, the
+        document's noise level) by the model's answerable margin, so a name close to everything
+        ("Tag" sits at 0.87 from "재고" with MiniLM) cannot cover a phrase by its cosine.
+        """
         doc_list = docs if docs is not None else self._docs(ds)
         if not self.vectors.is_available():
             return search(query, doc_list, kinds=kinds, limit=limit)
-        if min_semantic is None:
-            min_semantic = self.vectors.min_similarity
+        floor = self.vectors.min_similarity
         self._sync_ontology_vectors(ds, doc_list)
         wanted = [k for k in (kinds or SEARCH_DOC_KINDS) if k in SEARCH_DOC_KINDS] or list(SEARCH_DOC_KINDS)
         vec_hits = self.vectors.search(
@@ -1302,7 +1309,7 @@ class OntologyService:
             wanted,
             query,
             limit=max(limit * 3, 25),
-            min_similarity=min_semantic,
+            min_similarity=floor,
         )
         # A document scores the better of its full-text and name vectors.
         sem_scores: dict[tuple[str, str], float] = {}
@@ -1310,7 +1317,32 @@ class OntologyService:
             key = (h.kind, h.item_id.removesuffix(NAME_SUFFIX))
             if h.similarity > sem_scores.get(key, -1.0):
                 sem_scores[key] = h.similarity
+        min_semantic = floor
+        if strict:
+            margin = self.vectors.answerable_margin
+            noise = self._noise_levels(ds)
+            kept = {k: s for k, s in sem_scores.items() if s >= max(floor, noise.get(k, 0.0)) + margin}
+            dropped = sorted(set(sem_scores) - set(kept))
+            if dropped and any(sem_scores[k] >= floor + margin for k in dropped):
+                logger.info(
+                    "check_answerable: %r ignores vector hits on noisy names %s",
+                    query, ", ".join(f"{k[1]}={sem_scores[k]}/noise {noise.get(k)}" for k in dropped if sem_scores[k] >= floor + margin),
+                )
+            sem_scores, min_semantic = kept, floor + margin
         return search(query, doc_list, kinds=kinds, limit=limit, semantic_scores=sem_scores, min_semantic=min_semantic)
+
+    def _noise_levels(self, ds: dict[str, Any]) -> dict[tuple[str, str], float]:
+        """Noise level per (kind, document id), recomputed only when the vector index changes."""
+        key = self._synced_ontology_digest.get(ds["id"])
+        cached = self._noise.get(ds["id"])
+        if key is not None and cached is not None and cached[0] == key:
+            return cached[1]
+        levels = self.vectors.noise_levels(
+            f"ontology:{ds['id']}", list(SEARCH_DOC_KINDS), key=lambda iid: iid.removesuffix(NAME_SUFFIX)
+        )
+        if key is not None and levels:
+            self._noise[ds["id"]] = (key, levels)
+        return levels
 
     def search_ontology(self, query: str, kinds: list[str] | None = None, limit: int = 10, datasource: str | None = None) -> dict[str, Any]:
         ds = self.ds(datasource)
@@ -1658,7 +1690,7 @@ class OntologyService:
         for ent in entities:
             found = self._search(
                 ds, ent, kinds=["term", "attribute", "sql_attribute", "glossary", "table"], limit=6, docs=docs,
-                min_semantic=self.vectors.min_similarity + ANSWERABLE_MARGIN,
+                strict=True,
             )
             # As upstream, the glossary interprets a phrase and the semantic model covers it: a glossary
             # entry is never the match itself, its definition is looked up instead.
@@ -1752,7 +1784,7 @@ class OntologyService:
         if named:
             named.sort(key=lambda d: -len(d.title))
             return [{**d.payload, "kind": d.kind, "id": d.id, "name": d.title, "score": 1.0} for d in named[:3]]
-        hits = self._search(ds, definition, kinds=["term", "attribute", "sql_attribute"], limit=3, docs=docs)
+        hits = self._search(ds, definition, kinds=["term", "attribute", "sql_attribute"], limit=3, docs=docs, strict=True)
         return [h for h in hits if h["score"] >= 0.35]
 
     def _entity_links(self, ds: dict[str, Any], results: list[dict[str, Any]]) -> list[dict[str, Any]]:
