@@ -785,6 +785,83 @@ def _eval_semantic_mode(
     }
 
 
+COVERED_STATES = ("covered", "covered_via_glossary", "covered_by_value")
+
+
+def _eval_answerable_semantic(
+    svc: OntologyService, phrases: list[dict[str, Any]], answerable: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """check_answerable on one phrase at a time: precision of 'covered', recall of what should be.
+
+    A phrase counts as claimed when its state is covered, covered_via_glossary or covered_by_value.
+    A claim is right only for a phrase that should be covered and whose top match is one of
+    ``expected_any``; a claim on a phrase the ontology does not cover, or on the wrong Term, is a
+    false positive. ``answerable`` (the English check_answerable tasks) is scored alongside, so a
+    mode that keeps precision by covering less cannot hide a regression there.
+    """
+    t0 = time.perf_counter()
+    tasks: list[dict[str, Any]] = []
+    tp = fp = positives = 0
+    for item in phrases:
+        out = svc.check_answerable(item["phrase"], [item["phrase"]], datasource=item.get("datasource"))
+        entry = out["entities"][0]
+        state = entry["state"]
+        top = entry["matches"][0]["name"] if entry.get("matches") else None
+        claimed = state in COVERED_STATES
+        if item.get("expect_not_covered"):
+            ok = not claimed
+            fp += int(claimed)
+        else:
+            positives += 1
+            right = claimed and state != "covered_by_value" and top in item["expected_any"]
+            tp += int(right)
+            fp += int(claimed and not right)
+            ok = right
+        tasks.append({"phrase": item["phrase"], "passed": ok, "state": state, "top": top,
+                      "expected": "not_covered" if item.get("expect_not_covered") else item["expected_any"]})
+    elapsed = (time.perf_counter() - t0) * 1000.0
+    english, _ = _eval_check_answerable(svc, answerable, warmup=0, iterations=1)
+    return {
+        "precision": round(tp / (tp + fp), 4) if tp + fp else 1.0,
+        "recall": round(tp / positives, 4) if positives else 1.0,
+        "true_positives": tp,
+        "false_positives": fp,
+        "positives": positives,
+        "negatives": len(phrases) - positives,
+        "false_positive_phrases": [t["phrase"] for t in tasks if not t["passed"] and t["state"] in COVERED_STATES],
+        "english_score": english["score"],
+        "english_failed": [t["id"] for t in english["tasks"] if not t["passed"]],
+        "elapsed_ms": round(elapsed, 1),
+        "tasks": tasks,
+    }
+
+
+def run_answerable_benchmark(
+    tasks_path: Path = DEFAULT_TASKS_PATH, *, embedder: Any = None, model: str | None = None, semantic: bool = True
+) -> dict[str, Any]:
+    """Score check_answerable on the Korean phrase set with one model (hybrid) or none (lexical)."""
+    spec = json.loads(Path(tasks_path).read_text(encoding="utf-8"))
+    with tempfile.TemporaryDirectory(prefix="aom-bench-ans-") as tmp:
+        tmp_path = Path(tmp)
+        demo_db = build_demo_database(tmp_path / "demo.sqlite", seed=int(spec.get("seed", 7)))
+        svc, _ = _make_service(tmp_path / "svc", demo_db, semantic=semantic, embedder=embedder, model=model)
+        if semantic and not svc.vectors.is_available():
+            raise RuntimeError("Hybrid search is unavailable: " + str(svc.semantic_status().get("reason")))
+        _apply_setup(svc, spec["setup"])
+        result = _eval_answerable_semantic(svc, spec["answerable_semantic"], spec["check_answerable"])
+        result["search_mode"] = "hybrid" if semantic else "lexical"
+        if semantic:
+            result["model"] = svc.vectors.model_name
+            result["min_similarity"] = svc.vectors.min_similarity
+            result["answerable_margin"] = svc.vectors.answerable_margin
+    logger.info(
+        "answerable benchmark (%s %s): precision=%s recall=%s fp=%s english=%s",
+        result["search_mode"], result.get("model", ""), result["precision"], result["recall"],
+        result["false_positive_phrases"], result["english_score"],
+    )
+    return result
+
+
 def run_semantic_benchmark(
     tasks_path: Path = DEFAULT_TASKS_PATH,
     *,
@@ -825,9 +902,14 @@ def run_semantic_benchmark(
             _apply_setup(svc, spec["setup"])
             logger.info("semantic benchmark: running %d tasks in %s mode", len(tasks_spec), mode)
             modes[mode] = _eval_semantic_mode(svc, tasks_spec, warmup=warmup, iterations=iterations)
+            if spec.get("answerable_semantic"):
+                modes[mode]["check_answerable"] = _eval_answerable_semantic(
+                    svc, spec["answerable_semantic"], spec["check_answerable"]
+                )
             if mode == "hybrid":
                 modes[mode]["model"] = svc.vectors.model_name
                 modes[mode]["min_similarity"] = svc.vectors.min_similarity
+                modes[mode]["answerable_margin"] = svc.vectors.answerable_margin
                 modes[mode]["model_load_ms"] = round(load_ms, 1)
                 disk = model_disk_bytes(svc.vectors.model_name, svc.settings.embedding_cache_dir)
                 modes[mode]["model_disk_mb"] = round(disk / 1e6, 1) if disk is not None else None
@@ -1280,10 +1362,18 @@ def _format_semantic_text(sem: dict[str, Any]) -> str:
             f"neg={m['negative_precision']:.2f}  p50={m['latency_ms']['p50']:.3f}ms  "
             f"p95={m['latency_ms']['p95']:.3f}ms  cold={m['cold_pass_ms']:.1f}ms"
         )
+    for mode in SEMANTIC_MODES:
+        ca = sem["modes"][mode].get("check_answerable")
+        if ca:
+            lines.append(
+                f"  - {mode:8s} check_answerable precision={ca['precision']:.2f}  recall={ca['recall']:.2f}  "
+                f"({ca['positives']} covered, {ca['negatives']} not covered)  english={ca['english_score']:.2f}"
+                + (f"  false positives: {', '.join(ca['false_positive_phrases'])}" if ca["false_positive_phrases"] else "")
+            )
     h = sem["modes"]["hybrid"]
     if h.get("model_load_ms") is not None:
         lines.append(
-            f"  - model    floor={h.get('min_similarity')}  load={h['model_load_ms']:.0f}ms  "
+            f"  - model    floor={h.get('min_similarity')}  answerable margin={h.get('answerable_margin')}  load={h['model_load_ms']:.0f}ms  "
             f"disk={h.get('model_disk_mb') if h.get('model_disk_mb') is not None else '?'}MB"
         )
     d = sem["delta"]
@@ -1317,6 +1407,11 @@ def _format_semantic_markdown(sem: dict[str, Any]) -> str:
         )
     d = sem["delta"]
     lines.append(f"| delta | {d[key]:+.4f} | {d['mrr']:+.4f} | | | | | {d['p50_ms']:+.3f} | |")
+    if all(sem["modes"][m].get("check_answerable") for m in SEMANTIC_MODES):
+        lines += ["", "| Mode | check_answerable precision | Recall | English tasks |", "|---|---:|---:|---:|"]
+        for mode in SEMANTIC_MODES:
+            ca = sem["modes"][mode]["check_answerable"]
+            lines.append(f"| {mode} | {ca['precision']:.2f} | {ca['recall']:.2f} | {ca['english_score']:.2f} |")
     return "\n".join(lines)
 
 

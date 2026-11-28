@@ -533,12 +533,14 @@ Limits to know about:
 - Search is lexical by default (FTS5 matches words and prefixes, not meaning). Install the optional `semantic` extra (`fastembed` + `sqlite-vec`) to enable local hybrid vector search for synonyms, paraphrases and multilingual queries without external API keys. On the built-in benchmark it lifts recall@3 on synonym, paraphrase and Korean-English queries from 0.40 to 0.96 and raises query latency from p50 2.4 ms to 13.7 ms, about 11 ms more (`uv run python benchmarks/run_benchmark.py --semantic --iterations 10`, median of three 4-vCPU GitHub Actions runners on 2026-11-28, kept in `benchmarks/baseline.json`). Otherwise, search with the words the sources use, add your own words as synonyms, and translate when the sources are in another language.
 - The default model misses some short Korean compounds ("주문 상태" sits at 0.31 from "Order Status", below unrelated names). Save the phrase once as a synonym (search replies offer the call), or opt into the larger model with `AUTO_ONTOLOGY_EMBEDDING_MODEL=mpnet`:
 
-  | Model | Recall@3 | Negatives | Disk | Load | p50 |
-  |---|---:|---:|---:|---:|---:|
-  | MiniLM-L12 (default) | 0.96 | 1.00 | 252 MB | 0.6 s | 15.5 ms |
-  | mpnet-base | 1.00 | 1.00 | 1127 MB | 0.9 s | 22.8 ms |
+  | Model | Recall@3 | Negatives | `check_answerable` precision | `check_answerable` recall | Disk | Load | p50 |
+  |---|---:|---:|---:|---:|---:|---:|---:|
+  | MiniLM-L12 (default) | 0.96 | 1.00 | 1.00 | 0.36 | 252 MB | 0.6 s | 15.5 ms |
+  | mpnet-base | 1.00 | 1.00 | 1.00 | 0.43 | 1127 MB | 0.9 s | 22.8 ms |
 
-  `uv run --extra semantic python scripts/check_semantic_recall.py --model mpnet`, one run each on a busy Mac on 2026-11-28 with the models already downloaded, so compare the p50 columns with each other rather than with the runner figure above; the first download of mpnet takes about 100 s.
+  `uv run --extra semantic python scripts/check_semantic_recall.py --model mpnet` and `scripts/check_answerable_precision.py --model mpnet`, one run each on a busy Mac on 2026-11-28 with the models already downloaded, so compare the p50 columns with each other rather than with the runner figure above; the first download of mpnet takes about 100 s. The `check_answerable` columns score 53 Korean phrases one at a time (28 the demo covers, 25 it does not): precision is the share of `covered` answers that name the right Term, recall the share of the 28 it covers. A vector hit covers a phrase only when it clears the larger of the model's floor and the matched name's noise level (its similarity to everyday words such as "weather" or "bread") by a margin per model, 0.30 for MiniLM and 0.40 for mpnet, the smallest that keep precision at 1.0. Without the noise level, short names such as "Tag" covered "재고", "광고" and "주가".
+
+  MiniLM stays the default: at the same precision mpnet covers 2 more of the 28 phrases and finds "주문 상태" in search, for 4.5 times the disk. Pick mpnet when your users write in Korean and the disk is not a concern; either way, missed phrases saved as synonyms match directly.
 - The store indexes passages, not whole originals. What the model did not save as a passage or summary is in the vault but not in `search_text`.
 - Nothing watches your files or the vault. When a document changes, ask the assistant to read it again. Earlier versions of its original stay in the vault until you delete them.
 - It is a single-user store on your machine. Back it up by copying `~/.auto-ontology-mcp`.
@@ -663,7 +665,7 @@ Over HTTP, a token is required to reach the server from anywhere but localhost: 
 | `AUTO_ONTOLOGY_TOOLSETS` | `all` | Tool groups to expose, comma-separated: `answer` (always on), `model`, `knowledge`, `share` |
 | `AUTO_ONTOLOGY_SEMANTIC` | `auto` | Optional local hybrid search (`fastembed` + `sqlite-vec`): `auto` enables when installed, `0` disables |
 | `AUTO_ONTOLOGY_EMBEDDING_MODEL` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | Local `fastembed` ONNX model used when the `semantic` extra is installed. `mpnet` picks the larger `paraphrase-multilingual-mpnet-base-v2` (see below) |
-| `AUTO_ONTOLOGY_MIN_SIMILARITY` | per model | Cosine floor for vector hits: 0.50 for MiniLM, 0.40 for mpnet, 0.50 for any other model |
+| `AUTO_ONTOLOGY_MIN_SIMILARITY` | per model | Cosine floor for vector hits: 0.50 for MiniLM, 0.40 for mpnet, 0.50 for any other model. `check_answerable` adds a margin per model on top (0.30, 0.40, 0.40) |
 | `AUTO_ONTOLOGY_EMBEDDING_CACHE` | unset | Optional cache directory for local `fastembed` model files |
 | `AUTO_ONTOLOGY_MCP_TOKEN` | unset | Token required by the HTTP transport (same as `--token`) |
 | `AUTO_ONTOLOGY_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | HTTP bind address |

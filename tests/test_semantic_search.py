@@ -398,7 +398,8 @@ def test_ontology_hybrid_recalls_synonyms_and_multilingual_terms(modeled):
 def test_ontology_hybrid_preserves_check_answerable_precision(modeled):
     _attach_embedder(modeled, ConceptEmbedder())
 
-    # "ad spend" has moderate (~0.55) semantic overlap with Revenue, below check_answerable's 0.75 guard.
+    # "ad spend" has moderate (~0.55) semantic overlap with Revenue, below check_answerable's
+    # floor + margin (0.50 + 0.40 for a model without a profile).
     missing = modeled.check_answerable(
         "Return on ad spend for flash drives",
         ["ad spend", "return on ad spend", "flash drive"],
@@ -406,7 +407,7 @@ def test_ontology_hybrid_preserves_check_answerable_precision(modeled):
     assert missing["verdict"] in ("partially_answerable", "not_answerable")
     assert any(e["entity"] == "ad spend" and e["state"] == "not_covered" for e in missing["entities"])
 
-    # True multilingual synonym ("매출" -> Revenue, similarity ~1.0 >= 0.75) IS covered.
+    # True multilingual synonym ("매출" -> Revenue, similarity ~1.0 >= 0.90) IS covered.
     covered = modeled.check_answerable("고객별 매출", ["고객", "매출"])
     assert covered["verdict"] == "answerable"
 

@@ -19,6 +19,7 @@ import math
 import sqlite3
 import struct
 import threading
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,8 +36,6 @@ RRF_K = 60
 # sit just above it for short synonyms ("turnover" -> "Revenue" 0.517 with the default
 # model), while unrelated queries stay under 0.36.
 ONTOLOGY_MIN_SEMANTIC = 0.50
-# check_answerable needs a confident match, this far above the model's floor.
-ANSWERABLE_MARGIN = 0.25
 # search_ontology pairs a missed phrase with a later hit only this close (a share of the floor):
 # "주문 상태" reaches "Order Status" at 0.31 with MiniLM, unrelated queries stay at or under 0.14.
 LEARN_FLOOR_RATIO = 0.5
@@ -51,6 +50,38 @@ MODEL_MIN_SIMILARITY: dict[str, float] = {
     DEFAULT_EMBEDDING_MODEL: 0.50,
     LARGER_EMBEDDING_MODEL: 0.40,
 }
+# check_answerable needs a confident match: a vector hit counts only this far above the larger of
+# the model's floor and the document's noise level (see NOISE_PROBES). Measured on
+# benchmarks/tasks.json answerable_semantic (Korean phrases): the smallest margin that keeps
+# precision at 1.0 is 0.30 with MiniLM and 0.40 with mpnet, which spreads unrelated words wider.
+ANSWERABLE_MARGIN: dict[str, float] = {
+    DEFAULT_EMBEDDING_MODEL: 0.30,
+    LARGER_EMBEDDING_MODEL: 0.40,
+}
+DEFAULT_ANSWERABLE_MARGIN = 0.40
+# Everyday words, one concept per row in several languages, that no business schema is about.
+# A short name such as "Tag" sits at 0.8-0.9 from many of them ("재고", "광고", "주가" alike), so
+# its cosine says nothing about a phrase. A document's noise level is its NOISE_RANK-th highest
+# similarity across these concepts: high for such hub names, about 0.3 for ordinary ones.
+NOISE_PROBES: tuple[tuple[str, ...], ...] = (
+    ("날씨", "天気", "天气", "Wetter", "clima", "météo", "weather"),
+    ("음악", "音楽", "音乐", "Musik", "música", "musique", "music"),
+    ("바다", "海", "Meer", "océano", "océan", "ocean"),
+    ("병원", "病院", "医院", "Krankenhaus", "hôpital", "hospital"),
+    ("시집", "詩", "Gedicht", "poesía", "poésie", "poetry"),
+    ("화산", "火山", "Vulkan", "volcán", "volcano"),
+    ("요리법", "レシピ", "食谱", "Rezept", "receta", "recipe"),
+    ("학교", "学校", "Schule", "escuela", "école", "school"),
+    ("은하", "銀河", "Galaxie", "galaxia", "galaxy"),
+    ("의자", "椅子", "Stuhl", "silla", "chaise", "chair"),
+    ("축구", "サッカー", "足球", "Fußball", "fútbol", "soccer"),
+    ("숲", "森", "森林", "Wald", "bosque", "forêt", "forest"),
+    ("다리", "橋", "桥", "Brücke", "puente", "pont", "bridge"),
+    ("꿈", "夢", "梦", "Traum", "sueño", "rêve", "dream"),
+    ("빵", "パン", "面包", "Brot", "pan", "pain", "bread"),
+    ("겨울", "冬", "Winter", "invierno", "hiver", "winter"),
+)
+NOISE_RANK = 3
 # Short names accepted by AUTO_ONTOLOGY_EMBEDDING_MODEL.
 MODEL_ALIASES: dict[str, str] = {
     "minilm": DEFAULT_EMBEDDING_MODEL,
@@ -71,6 +102,12 @@ def model_min_similarity(model_name: str, override: float | None = None) -> floa
     if override is not None:
         return float(override)
     return MODEL_MIN_SIMILARITY.get(model_name, DEFAULT_MIN_SIMILARITY)
+
+
+def answerable_margin(model_name: str) -> float:
+    """How far above max(floor, noise) a vector hit must be for check_answerable with ``model_name``."""
+    return ANSWERABLE_MARGIN.get(model_name, DEFAULT_ANSWERABLE_MARGIN)
+
 
 _MODEL_LOCK = threading.Lock()
 _MODEL_CACHE: dict[tuple[str, str | None], Any] = {}
@@ -203,6 +240,21 @@ def model_disk_bytes(model_name: str, cache_dir: Path | None = None) -> int | No
     return sum(f.stat().st_size for f in snapshots.rglob("*") if f.is_file())
 
 
+def _concept_maxima(vectors: list[list[float]], probes: list[list[list[float]]]) -> list[list[float]]:
+    """For each vector, its highest cosine to any word of each probe concept (vectors are unit length)."""
+    try:
+        import numpy as np
+
+        docs = np.asarray(vectors, dtype=np.float32)
+        cols = []
+        for row in probes:
+            words = np.asarray(row, dtype=np.float32)
+            cols.append((docs @ words.T).max(axis=1))
+        return np.stack(cols, axis=1).tolist()
+    except ImportError:
+        return [[max(cosine_similarity(v, w) for w in row) for row in probes] for v in vectors]
+
+
 class Embedder(Protocol):
     @property
     def model_name(self) -> str: ...
@@ -249,10 +301,16 @@ class FastEmbedder:
         return [normalize_vector(v) for v in fn(items)]
 
     def embed_query(self, text: str) -> list[float]:
+        vecs = self.embed_queries([text])
+        return vecs[0] if vecs else []
+
+    def embed_queries(self, texts: Sequence[str]) -> list[list[float]]:
+        items = list(texts)
+        if not items:
+            return []
         model = self._model()
         fn = getattr(model, "query_embed", None) or model.embed
-        vecs = list(fn([text]))
-        return normalize_vector(vecs[0]) if vecs else []
+        return [normalize_vector(v) for v in fn(items)]
 
 
 @dataclass(frozen=True)
@@ -299,6 +357,11 @@ class VectorIndex:
     def min_similarity(self) -> float:
         """Cosine floor for this index's model (``AUTO_ONTOLOGY_MIN_SIMILARITY`` overrides it)."""
         return model_min_similarity(self._model_name, self._min_similarity_override)
+
+    @property
+    def answerable_margin(self) -> float:
+        """check_answerable's margin over max(floor, noise) for this index's model."""
+        return answerable_margin(self._model_name)
 
     def _should_use_sqlite_vec(self) -> bool:
         if self._use_sqlite_vec is not None:
@@ -533,6 +596,68 @@ class VectorIndex:
                 self._last_error = str(exc)
                 logger.warning("Vector index sync failed for %s/%s; continuing with lexical search: %s", scope, kind, exc)
                 return {"embedded": 0, "deleted": 0, "unchanged": 0}
+
+    def _probe_vectors(self) -> list[list[list[float]]]:
+        cached = getattr(self, "_probe_cache", None)
+        if cached is not None and cached[0] == self._model_name:
+            return cached[1]
+        embedder = self._get_embedder()
+        words = [w for row in NOISE_PROBES for w in row]
+        batch = getattr(embedder, "embed_queries", None)
+        flat = batch(words) if batch else [embedder.embed_query(w) for w in words]
+        out, i = [], 0
+        for row in NOISE_PROBES:
+            out.append(flat[i: i + len(row)])
+            i += len(row)
+        self._probe_cache = (self._model_name, out)
+        return out
+
+    def noise_levels(self, scope: str, kinds: Sequence[str], key: Any = None) -> dict[tuple[str, str], float]:
+        """Each indexed item's similarity to unrelated everyday words (see NOISE_PROBES).
+
+        Returns ``{(kind, key(item_id)): level}``; items that ``key`` maps together (a document's
+        full-text and name vectors) share the per-concept maximum. Empty when embeddings are off.
+        """
+        if not self.is_available() or not self.path.exists():
+            return {}
+        started = time.perf_counter()
+        with self._lock:
+            try:
+                probes = self._probe_vectors()
+                with self._connect() as (con, use_vec0):
+                    meta = self._meta(con)
+                    if meta.get("model") != self._model_name or not meta.get("dim"):
+                        return {}
+                    table = "vec_embeddings" if use_vec0 else "vec_blobs"
+                    rows: list[tuple[tuple[str, str], list[float]]] = []
+                    for kind in dict.fromkeys(kinds):
+                        for r in con.execute(
+                            f"SELECT i.item_id, e.embedding FROM vec_items i JOIN {table} e ON e.rowid = i.id "
+                            "WHERE i.scope = ? AND i.kind = ?",
+                            (scope, kind),
+                        ):
+                            iid = key(r["item_id"]) if key else r["item_id"]
+                            rows.append(((kind, iid), deserialize_float32(r["embedding"])))
+            except Exception as exc:  # noqa: BLE001
+                self._last_error = str(exc)
+                logger.warning("Noise levels failed for %s; check_answerable uses the floor alone: %s", scope, exc)
+                return {}
+        if not rows:
+            return {}
+        per_concept = _concept_maxima([v for _, v in rows], probes)
+        best: dict[tuple[str, str], list[float]] = {}
+        for (k, _), sims in zip(rows, per_concept):
+            cur = best.get(k)
+            best[k] = sims if cur is None else [max(a, b) for a, b in zip(cur, sims)]
+        rank = min(NOISE_RANK, len(NOISE_PROBES)) - 1
+        levels = {k: round(sorted(v, reverse=True)[rank], 4) for k, v in best.items()}
+        top = sorted(levels.items(), key=lambda x: -x[1])[:3]
+        logger.info(
+            "noise levels for %s: %d items in %.0fms, highest %s",
+            scope, len(levels), (time.perf_counter() - started) * 1000.0,
+            ", ".join(f"{k[1]}={v}" for k, v in top),
+        )
+        return levels
 
     def similarities(self, query: str, texts: Sequence[str]) -> list[float] | None:
         """Cosine similarity of ``query`` to each of ``texts``; None when embeddings are off or fail."""
