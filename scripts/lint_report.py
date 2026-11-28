@@ -69,8 +69,12 @@ def log(msg: str) -> None:
 # Past tense -었다/-났다/-겠다 ends on a syllable whose final consonant is ㅆ.
 _N_FINAL = "".join(chr(0xAC00 + i * 28 + 4) for i in range(19 * 21))
 _SS_FINAL = "".join(chr(0xAC00 + i * 28 + 20) for i in range(19 * 21))
+# Those endings also sit inside a sentence: '실패한다 해도', '배포했다 하더라도', '있다 없다'.
+# A -다 followed by a concessive or conditional verb, or by 있다/없다, does not end the sentence.
+_INNER_DA = r"(?!(?:해도|하더라도|치더라도|치고|하고|하는|하면|하니|해서)(?![가-힣])|[있없]다)"
 _END = re.compile(
-    rf"(?:(?<=[.!?])|(?<=니다)|(?<=[{_SS_FINAL}]다)|(?<=[{_N_FINAL}]다)|(?<=[어아여해세에죠돼네]요)|(?<=죠))\s+|\n+"
+    rf"(?:(?<=[.!?])|(?<=니다)|(?<=[어아여해세에죠돼네]요)|(?<=죠))\s+"
+    rf"|(?<=[{_SS_FINAL}{_N_FINAL}]다)\s+{_INNER_DA}|\n+"
 )
 _ABBREV = re.compile(r"\b(?:e\.g|i\.e|vs|etc|cf)\.$", re.I)  # e.g. does not end a sentence
 _QUANTITY = re.compile(r"\d")
