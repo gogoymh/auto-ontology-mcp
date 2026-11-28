@@ -32,6 +32,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import platform
 import statistics
 import subprocess
@@ -74,6 +75,13 @@ SEMANTIC_MODES = ("lexical", "hybrid")
 SEMANTIC_RECALL_K = 3
 SCHEMA_VERSION = 2
 HASH_EMBED_DIM = 64
+# Latency is only comparable on the machine class the baseline was measured on; CI runs on
+# GitHub-hosted runners, so the baseline is re-measured there by this workflow.
+BASELINE_WORKFLOW = "benchmark-baseline.yml"
+REFRESH_COMMAND = (
+    f"gh workflow run {BASELINE_WORKFLOW} --ref <branch> && "
+    "gh run download <run-id> -n baseline -D benchmarks"
+)
 
 
 class HashEmbedder:
@@ -112,6 +120,38 @@ def _git_commit() -> str:
         return out.strip()
     except Exception:  # noqa: BLE001
         return "unknown"
+
+
+def _cpu_model() -> str:
+    try:
+        for line in Path("/proc/cpuinfo").read_text(encoding="utf-8").splitlines():
+            if line.startswith("model name"):
+                return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return platform.processor() or platform.machine()
+
+
+def _environment() -> dict[str, Any]:
+    """Where the latency was measured, so a baseline from another machine class is recognised."""
+    env = os.environ
+    on_actions = env.get("GITHUB_ACTIONS") == "true"
+    run_url = None
+    if on_actions and env.get("GITHUB_RUN_ID"):
+        run_url = (
+            f"{env.get('GITHUB_SERVER_URL', 'https://github.com')}/{env.get('GITHUB_REPOSITORY', '')}"
+            f"/actions/runs/{env['GITHUB_RUN_ID']}/attempts/{env.get('GITHUB_RUN_ATTEMPT', '1')}"
+        )
+    return {
+        "github_actions": on_actions,
+        "os": f"{platform.system()} {platform.release()}",
+        "cpu": _cpu_model(),
+        "cpu_count": os.cpu_count(),
+        "runner_image": f"{env['ImageOS']} {env.get('ImageVersion', '')}".strip() if env.get("ImageOS") else None,
+        "runner_name": env.get("RUNNER_NAME"),
+        "label": env.get("BENCHMARK_LABEL"),
+        "run_url": run_url,
+    }
 
 
 def _percentile(values: list[float], p: float) -> float:
@@ -794,11 +834,30 @@ def run_semantic_benchmark(
 
     lex, hyb = modes["lexical"], modes["hybrid"]
     key = f"recall_at_{SEMANTIC_RECALL_K}"
+    lex_p50 = lex["latency_ms"]["p50"]
+    hyb_p50 = hyb["latency_ms"]["p50"]
+    logger.info(
+        "semantic benchmark: recall@%d lexical=%.4f hybrid=%.4f, p50 lexical=%.3fms hybrid=%.3fms",
+        SEMANTIC_RECALL_K, lex[key], hyb[key], lex_p50, hyb_p50,
+    )
+    return {
+        "tasks_total": len(tasks_spec),
+        "recall_k": SEMANTIC_RECALL_K,
+        "iterations": iterations,
+        "runs": 1,
+        "modes": modes,
+        "delta": _semantic_delta(modes),
+    }
+
+
+def _semantic_delta(modes: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    lex, hyb = modes["lexical"], modes["hybrid"]
+    key = f"recall_at_{SEMANTIC_RECALL_K}"
     lex_ok = {t["id"]: t["passed"] for t in lex["tasks"]}
     hyb_ok = {t["id"]: t["passed"] for t in hyb["tasks"]}
     lex_p50 = lex["latency_ms"]["p50"]
     hyb_p50 = hyb["latency_ms"]["p50"]
-    delta = {
+    return {
         key: round(hyb[key] - lex[key], 4),
         "mrr": round(hyb["mrr"] - lex["mrr"], 4),
         "recall_by_group": {
@@ -810,11 +869,6 @@ def run_semantic_benchmark(
         "gained": sorted(i for i, ok in hyb_ok.items() if ok and not lex_ok.get(i)),
         "lost": sorted(i for i, ok in lex_ok.items() if ok and not hyb_ok.get(i)),
     }
-    logger.info(
-        "semantic benchmark: recall@%d lexical=%.4f hybrid=%.4f, p50 lexical=%.3fms hybrid=%.3fms",
-        SEMANTIC_RECALL_K, lex[key], hyb[key], lex_p50, hyb_p50,
-    )
-    return {"tasks_total": len(tasks_spec), "recall_k": SEMANTIC_RECALL_K, "modes": modes, "delta": delta}
 
 
 def _run_once(spec: dict[str, Any], *, warmup: int, iterations: int) -> dict[str, Any]:
@@ -939,10 +993,101 @@ def run_benchmark(
         "iterations": iterations,
         "repeats": repeats,
         "hybrid_embedder": HashEmbedder.model_name,
+        "environments": [_environment()],
         "overall_score": first["overall_score"],
         "scores": first["scores"],
         "latency_ms": latency,
     }
+
+
+def _median(values: list[float], digits: int = 3) -> float:
+    return round(statistics.median(values), digits)
+
+
+def merge_results(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Combine benchmark outputs from several machines: quality from the first, latency the median per machine.
+
+    Each input is one machine's run (itself a median of its repeats), so one slow runner cannot move
+    the baseline p50. ``p50_runs`` keeps every repeat of every machine.
+    """
+    if not results:
+        raise ValueError("merge_results needs at least one benchmark result")
+    first = results[0]
+    for i, res in enumerate(results[1:], start=2):
+        if res["overall_score"] != first["overall_score"]:
+            raise ValueError(
+                f"result {i} quality differs from result 1 ({res['overall_score']} vs {first['overall_score']})"
+            )
+    latency: dict[str, Any] = {}
+    for cat in LATENCY_CATEGORIES:
+        per = [r["latency_ms"][cat] for r in results]
+        latency[cat] = {
+            "mean": _median([p["mean"] for p in per]),
+            "p50": _median([p["p50"] for p in per]),
+            "p95": _median([p["p95"] for p in per]),
+            "count": sum(p["count"] for p in per),
+            "p50_runs": [v for p in per for v in p.get("p50_runs", [p["p50"]])],
+            "p50_machines": [p["p50"] for p in per],
+        }
+    latency["total_suite_ms"] = _median([r["latency_ms"]["total_suite_ms"] for r in results])
+    merged = {k: v for k, v in first.items() if k not in ("latency_ms", "environments", "semantic_search")}
+    merged.update(
+        {
+            "measured_at": max(r["measured_at"] for r in results),
+            "repeats": sum(r.get("repeats", 1) for r in results),
+            "machines": len(results),
+            "environments": [e for r in results for e in r.get("environments", [])],
+            "latency_ms": latency,
+        }
+    )
+    logger.info(
+        "merged %d benchmark results: hybrid_search p50=%.3fms vector_sync p50=%.3fms",
+        len(results), latency["hybrid_search"]["p50"], latency["vector_sync"]["p50"],
+    )
+    return merged
+
+
+def merge_semantic(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Combine ``semantic_search`` sections from several machines: recall from the first, latency the median."""
+    if not results:
+        raise ValueError("merge_semantic needs at least one semantic result")
+    first = results[0]
+    key = f"recall_at_{first['recall_k']}"
+    modes: dict[str, dict[str, Any]] = {}
+    for mode in SEMANTIC_MODES:
+        per = [r["modes"][mode] for r in results]
+        for i, m in enumerate(per[1:], start=2):
+            if m[key] != per[0][key]:
+                logger.warning("semantic result %d %s %s differs (%s vs %s); keeping result 1", i, mode, key, m[key], per[0][key])
+        lat = [m["latency_ms"] for m in per]
+        merged_mode = dict(per[0])
+        merged_mode["latency_ms"] = {
+            "mean": _median([p["mean"] for p in lat]),
+            "p50": _median([p["p50"] for p in lat]),
+            "p95": _median([p["p95"] for p in lat]),
+            "count": sum(p["count"] for p in lat),
+            "p50_runs": [p["p50"] for p in lat],
+        }
+        merged_mode["cold_pass_ms"] = _median([m["cold_pass_ms"] for m in per])
+        if mode == "hybrid" and all(m.get("model_load_ms") is not None for m in per):
+            merged_mode["model_load_ms"] = _median([m["model_load_ms"] for m in per], 1)
+        modes[mode] = merged_mode
+    return {
+        "tasks_total": first["tasks_total"],
+        "recall_k": first["recall_k"],
+        "iterations": first.get("iterations"),
+        "runs": sum(r.get("runs", 1) for r in results),
+        "modes": modes,
+        "delta": _semantic_delta(modes),
+    }
+
+
+def _same_machine_class(baseline: dict[str, Any], current: dict[str, Any]) -> bool | None:
+    """True when both sides ran on GitHub Actions (or both off it); None when a side has no record."""
+    b_envs, c_envs = baseline.get("environments"), current.get("environments")
+    if not b_envs or not c_envs:
+        return None
+    return all(e.get("github_actions") for e in b_envs) == all(e.get("github_actions") for e in c_envs)
 
 
 def compare_results(
@@ -1030,6 +1175,25 @@ def compare_results(
 
     failed = bool(quality_regressions) or (fail_on_latency and bool(latency_regressions))
     status = "regressed" if failed else ("warn" if latency_regressions else "ok")
+    same_class = _same_machine_class(baseline, current)
+    environment_note = None
+    if same_class is False:
+        environment_note = (
+            "The baseline and this run were measured on different machine classes "
+            "(GitHub Actions vs elsewhere), so latency ratios are not comparable."
+        )
+    refresh_hint = None
+    if latency_regressions:
+        slow = ", ".join(
+            f"{r['category']} {r['baseline_p50_ms']:.3f} -> {r['current_p50_ms']:.3f} ms ({r['ratio']:.2f}x)"
+            for r in latency_regressions
+        )
+        refresh_hint = (
+            f"Slower than the baseline by more than {max_latency_ratio}x and {min_latency_delta_ms} ms: {slow}. "
+            f"If the slowdown is intended, re-measure the baseline on GitHub runners with "
+            f"`{REFRESH_COMMAND}` and commit benchmarks/baseline.json."
+        )
+        logger.warning("benchmark latency regression: %s", slow)
 
     return {
         "status": status,
@@ -1047,6 +1211,9 @@ def compare_results(
         "latency": latency_diffs,
         "quality_regressions": quality_regressions,
         "latency_regressions": latency_regressions,
+        "same_machine_class": same_class,
+        "environment_note": environment_note,
+        "refresh_hint": refresh_hint,
         "reproduce_command": "uv run python benchmarks/run_benchmark.py --compare benchmarks/baseline.json",
     }
 
@@ -1181,6 +1348,10 @@ def _format_compare_text(cmp: dict[str, Any]) -> str:
             f"  - {cat:24s} {lat['baseline_p50_ms']:.3f} -> {lat['current_p50_ms']:.3f} "
             f"({lat['delta_ms']:+.3f}ms, {lat['ratio']:.2f}x){flag}"
         )
+    if cmp.get("environment_note"):
+        lines += ["", f"Note: {cmp['environment_note']}"]
+    if cmp.get("refresh_hint"):
+        lines += ["", cmp["refresh_hint"]]
     if cmp["failed"]:
         lines.append("")
         lines.append(f"Reproduce: {cmp['reproduce_command']}")
@@ -1222,6 +1393,10 @@ def _format_compare_markdown(cmp: dict[str, Any]) -> str:
         for reg in cmp["quality_regressions"]:
             failed_ids = ", ".join(reg.get("newly_failing") or []) or "(aggregate drop)"
             lines.append(f"- `{reg['category']}`: {failed_ids}")
+    if cmp.get("environment_note"):
+        lines += ["", f"> {cmp['environment_note']}"]
+    if cmp.get("refresh_hint"):
+        lines += ["", cmp["refresh_hint"]]
     if cmp["failed"]:
         lines += ["", f"Reproduce: `{cmp['reproduce_command']}`"]
     return "\n".join(lines)
@@ -1239,6 +1414,22 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help="Compare two saved benchmark JSON files without executing the suite.",
+    )
+    parser.add_argument(
+        "--merge",
+        nargs="+",
+        metavar="RESULT",
+        type=Path,
+        default=None,
+        help="Merge benchmark JSON files from several machines (median latency) into --output without running the suite.",
+    )
+    parser.add_argument(
+        "--merge-semantic",
+        nargs="+",
+        metavar="RESULT",
+        type=Path,
+        default=None,
+        help="With --merge: take semantic_search from these --semantic runs and merge them the same way.",
     )
     parser.add_argument("--warmup", type=int, default=1, help="Warmup passes before timing.")
     parser.add_argument("--iterations", type=int, default=3, help="Timed passes per benchmark area.")
@@ -1303,6 +1494,24 @@ def main(argv: list[str] | None = None) -> int:
             print(_format_compare_text(cmp))
         _append_summary(args.summary_file, cmp)
         return 1 if cmp["failed"] else 0
+
+    if args.merge is not None:
+        merged = merge_results([json.loads(p.read_text(encoding="utf-8")) for p in args.merge])
+        if args.merge_semantic:
+            sems = [json.loads(p.read_text(encoding="utf-8")) for p in args.merge_semantic]
+            missing = [str(p) for p, s in zip(args.merge_semantic, sems) if "semantic_search" not in s]
+            if missing:
+                print(f"error: no semantic_search in {', '.join(missing)}", file=sys.stderr)
+                return 2
+            merged["semantic_search"] = merge_semantic([s["semantic_search"] for s in sems])
+        text = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
+        if args.output is not None:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(text, encoding="utf-8")
+            logger.info("merged baseline written to %s", args.output)
+        else:
+            print(text, end="")
+        return 0
 
     result = run_benchmark(args.tasks, warmup=args.warmup, iterations=args.iterations, repeats=args.repeats)
     if args.semantic:

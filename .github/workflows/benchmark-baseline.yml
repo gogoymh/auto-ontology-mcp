@@ -1,0 +1,81 @@
+name: benchmark-baseline
+
+# Re-measure benchmarks/baseline.json on the same kind of GitHub-hosted runner that ci compares against.
+# Run it from the Actions tab (or push a baseline/* branch), then:
+#   gh run download <run-id> -n baseline -D benchmarks
+# and commit benchmarks/baseline.json.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["baseline/**"]
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [1, 2, 3]
+    env:
+      BENCHMARK_LABEL: runner-${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      # Same install and command as the ci compare step, so the numbers match what ci measures.
+      - run: uv sync --extra postgres --extra duckdb
+      - name: Measure default mode
+        run: >-
+          uv run python benchmarks/run_benchmark.py
+          --repeats 5
+          --output out/default-${{ matrix.runner }}.json
+      - name: Cache fastembed model
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/fastembed-cache
+          key: ${{ runner.os }}-fastembed-paraphrase-multilingual-MiniLM-L12-v2
+      - name: Install semantic extra
+        run: uv sync --extra semantic
+      - name: Measure semantic mode
+        run: >-
+          uv run python benchmarks/run_benchmark.py
+          --semantic --iterations 10
+          --repeats 1
+          --output out/semantic-${{ matrix.runner }}.json
+        env:
+          AUTO_ONTOLOGY_EMBEDDING_CACHE: ${{ runner.temp }}/fastembed-cache
+          FASTEMBED_CACHE_PATH: ${{ runner.temp }}/fastembed-cache
+      - uses: actions/upload-artifact@v4
+        with:
+          name: run-${{ matrix.runner }}
+          path: out/
+
+  merge:
+    needs: measure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: run-*
+          path: out
+          merge-multiple: true
+      - name: Merge the three runners into the baseline
+        run: >-
+          uv run python benchmarks/run_benchmark.py
+          --merge out/default-1.json out/default-2.json out/default-3.json
+          --merge-semantic out/semantic-1.json out/semantic-2.json out/semantic-3.json
+          --output benchmarks/baseline.json
+      - name: Show the new baseline next to the committed one
+        run: >-
+          git show HEAD:benchmarks/baseline.json > out/committed.json &&
+          uv run python benchmarks/run_benchmark.py
+          --compare-only out/committed.json benchmarks/baseline.json
+          --format markdown --summary-file "$GITHUB_STEP_SUMMARY"
+          || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: baseline
+          path: benchmarks/baseline.json
